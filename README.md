@@ -1,2 +1,2 @@
-# some shells
+AIshells
 powered by AI
