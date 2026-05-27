@@ -26,6 +26,42 @@ renewx::prepare() {
     password="$(renewx::ask_password)" || return 1
     renewx::write_config "$password" || { log::err "Config.xml 生成失败"; return 1; }
     log::info "Config.xml 已写入: $CONFIG_FILE"
+
+    if sys::has_cmd caddy; then
+        echo
+        log::step "Caddy 反向代理设置"
+        if ui::confirm "检测到已安装 Caddy，是否为您生成 RenewX 的反代配置？"; then
+            local domain
+            ui::prompt "请输入需要绑定并反代的外部域名 (含端口，如 my.domain.com:8443): " domain
+            if [[ -n "$domain" ]]; then
+                mkdir -p /etc/caddy/sites.d
+                
+                if [[ -f /etc/caddy/Caddyfile ]] && ! grep -q 'import /etc/caddy/sites.d/\*.caddy' /etc/caddy/Caddyfile; then
+                    echo -e "\nimport /etc/caddy/sites.d/*.caddy" >> /etc/caddy/Caddyfile
+                elif [[ ! -f /etc/caddy/Caddyfile ]]; then
+                    echo "import /etc/caddy/sites.d/*.caddy" > /etc/caddy/Caddyfile
+                fi
+
+                cat > /etc/caddy/sites.d/renewx.caddy << EOF
+${domain} {
+    reverse_proxy 127.0.0.1:1066 {
+        # 告诉后端："外部用户使用的是 443 端口，请按这个生成跳转链接"
+        header_up X-Forwarded-Port 443
+    }
+
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+EOF
+                log::info "反代配置已写入: /etc/caddy/sites.d/renewx.caddy"
+                log::warn "注意：请确保后续将证书放置在 /etc/caddy/certs/cert.pem 和 key.pem"
+                if ui::confirm "是否立即重启 Caddy 服务以应用配置?"; then
+                    systemctl restart caddy && log::info "Caddy 已重启。"
+                fi
+            else
+                log::warn "未输入域名，跳过反代配置。"
+            fi
+        fi
+    fi
 }
 
 # 部署/启动：合并目录创建、密码设置、镜像拉取、容器创建

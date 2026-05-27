@@ -5,8 +5,8 @@
 # 由 build.sh 自动拼接生成，请勿直接编辑本文件。
 # 源码位于 src/ 与 assets/，运行 `bash build.sh` 重新生成。
 #
-# Build:    2026-05-27 15:28:59 UTC
-# Commit:   3cd7e1e
+# Build:    2026-05-27 15:32:16 UTC
+# Commit:   8c72713
 #
 
 set -uo pipefail
@@ -305,6 +305,42 @@ renewx::prepare() {
     password="$(renewx::ask_password)" || return 1
     renewx::write_config "$password" || { log::err "Config.xml 生成失败"; return 1; }
     log::info "Config.xml 已写入: $CONFIG_FILE"
+
+    if sys::has_cmd caddy; then
+        echo
+        log::step "Caddy 反向代理设置"
+        if ui::confirm "检测到已安装 Caddy，是否为您生成 RenewX 的反代配置？"; then
+            local domain
+            ui::prompt "请输入需要绑定并反代的外部域名 (含端口，如 my.domain.com:8443): " domain
+            if [[ -n "$domain" ]]; then
+                mkdir -p /etc/caddy/sites.d
+                
+                if [[ -f /etc/caddy/Caddyfile ]] && ! grep -q 'import /etc/caddy/sites.d/\*.caddy' /etc/caddy/Caddyfile; then
+                    echo -e "\nimport /etc/caddy/sites.d/*.caddy" >> /etc/caddy/Caddyfile
+                elif [[ ! -f /etc/caddy/Caddyfile ]]; then
+                    echo "import /etc/caddy/sites.d/*.caddy" > /etc/caddy/Caddyfile
+                fi
+
+                cat > /etc/caddy/sites.d/renewx.caddy << EOF
+${domain} {
+    reverse_proxy 127.0.0.1:1066 {
+        # 告诉后端："外部用户使用的是 443 端口，请按这个生成跳转链接"
+        header_up X-Forwarded-Port 443
+    }
+
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+EOF
+                log::info "反代配置已写入: /etc/caddy/sites.d/renewx.caddy"
+                log::warn "注意：请确保后续将证书放置在 /etc/caddy/certs/cert.pem 和 key.pem"
+                if ui::confirm "是否立即重启 Caddy 服务以应用配置?"; then
+                    systemctl restart caddy && log::info "Caddy 已重启。"
+                fi
+            else
+                log::warn "未输入域名，跳过反代配置。"
+            fi
+        fi
+    fi
 }
 
 # 部署/启动：合并目录创建、密码设置、镜像拉取、容器创建
@@ -591,7 +627,7 @@ env::install_docker() {
 }
 
 env::install_caddy() {
-    log::info "准备安装 Caddy 及配置反代..."
+    log::info "准备安装 Caddy..."
     if ! sys::has_cmd caddy; then
         log::step "安装 Caddy (Debian 官方源)..."
         apt-get update
@@ -600,45 +636,15 @@ env::install_caddy() {
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
         apt-get update
         apt-get install -y caddy || { log::err "Caddy 安装失败"; return 1; }
+        log::info "Caddy 安装完成。"
     else
         log::info "Caddy 已安装，跳过安装步骤。"
     fi
-
-    log::step "写入 Caddy 反代配置..."
-    local domain
-    ui::prompt "请输入需要绑定并反代的外部域名 (含端口，如 my.domain.com:8443): " domain
-    if [[ -z "$domain" ]]; then
-        log::warn "未输入域名，取消反代配置生成。"
-        return
-    fi
-
-    # 确保 /etc/caddy 和 sites.d 存在
-    mkdir -p /etc/caddy/sites.d
-    
-    # 确保默认的 Caddyfile 包含了 import /etc/caddy/sites.d/*.caddy
-    if [[ -f /etc/caddy/Caddyfile ]] && ! grep -q 'import /etc/caddy/sites.d/\*.caddy' /etc/caddy/Caddyfile; then
-        echo -e "\nimport /etc/caddy/sites.d/*.caddy" >> /etc/caddy/Caddyfile
-    elif [[ ! -f /etc/caddy/Caddyfile ]]; then
-        echo "import /etc/caddy/sites.d/*.caddy" > /etc/caddy/Caddyfile
-    fi
-
-    # 写入 renewx 专属配置
-    cat > /etc/caddy/sites.d/renewx.caddy << EOF
-${domain} {
-    reverse_proxy 127.0.0.1:1066 {
-        # 告诉后端："外部用户使用的是 443 端口，请按这个生成跳转链接"
-        header_up X-Forwarded-Port 443
-    }
-
-    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
 }
-EOF
-    
-    log::info "配置已写入: /etc/caddy/sites.d/renewx.caddy"
-    log::warn "请确保您已手动将证书放置在: /etc/caddy/certs/cert.pem 和 key.pem"
-    if ui::confirm "是否立即重启 Caddy 服务以应用配置?"; then
-        systemctl restart caddy && log::info "Caddy 已重启。"
-    fi
+
+env::install_all() {
+    env::install_docker
+    env::install_caddy
 }
 
 env::menu() {
@@ -648,15 +654,17 @@ env::menu() {
         echo -e "          ${BLUE}常用环境与依赖安装${PLAIN}"
         echo -e "════════════════════════════════════════════════"
         echo -e "  ${GREEN}1.${PLAIN} 安装 Docker (官方源)"
-        echo -e "  ${GREEN}2.${PLAIN} 安装 Caddy  (官方源) + 配置反代"
+        echo -e "  ${GREEN}2.${PLAIN} 安装 Caddy  (官方源)"
+        echo -e "  ${GREEN}3.${PLAIN} 一键安装 Docker 与 Caddy"
         echo -e "  ${GREEN}0.${PLAIN} 返回主菜单"
         ui::divider
         echo
         local opt
-        ui::prompt " 请输入选项 [0-2]: " opt
+        ui::prompt " 请输入选项 [0-3]: " opt
         case "$opt" in
             1) env::install_docker ;;
             2) env::install_caddy ;;
+            3) env::install_all ;;
             0) return 0 ;;
             *) log::err "无效选项" ;;
         esac
