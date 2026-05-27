@@ -30,6 +30,8 @@ renewx::prepare() {
 
 # 部署/启动：合并目录创建、密码设置、镜像拉取、容器创建
 renewx::deploy() {
+    sys::require_docker || return 1
+
     if renewx::running; then
         log::info "容器已在运行中"
         return 0
@@ -258,5 +260,37 @@ renewx::uninstall() {
         fi
     fi
 
-    log::info "RenewX 已卸载"
+    # 清理快捷指令
+    if [[ -n "${INSTALL_PATH:-}" && -f "$INSTALL_PATH" ]]; then
+        rm -f "$INSTALL_PATH"
+        log::info "全局快捷指令 ($INSTALL_PATH) 已移除"
+    fi
+
+    if sys::has_cmd caddy; then
+        echo
+        log::warn "检测到系统安装了 Caddy 环境。"
+        if ui::confirm "是否连同 Caddy 一起彻底卸载并清理配置？(慎重，可能影响其他业务)"; then
+            log::step "卸载 Caddy..."
+            systemctl stop caddy 2>/dev/null || true
+            systemctl disable caddy 2>/dev/null || true
+            apt-get purge -y caddy >/dev/null 2>&1
+            rm -rf /etc/caddy /usr/share/caddy /var/lib/caddy /var/log/caddy
+            log::info "Caddy 已被彻底清理"
+        fi
+    fi
+
+    if sys::has_cmd docker; then
+        echo
+        log::warn "检测到系统安装了 Docker 引擎。"
+        if ui::confirm "是否连同 Docker 一起彻底卸载并清理数据目录？(高危，将丢失所有容器数据)"; then
+            log::step "卸载 Docker..."
+            systemctl stop docker 2>/dev/null || true
+            systemctl disable docker 2>/dev/null || true
+            apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker.io >/dev/null 2>&1
+            rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+            log::info "Docker 引擎及数据已被彻底清理"
+        fi
+    fi
+
+    log::info "RenewX 相关组件及脚本清理已完成！"
 }

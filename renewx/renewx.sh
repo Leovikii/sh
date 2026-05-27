@@ -5,8 +5,8 @@
 # 由 build.sh 自动拼接生成，请勿直接编辑本文件。
 # 源码位于 src/ 与 assets/，运行 `bash build.sh` 重新生成。
 #
-# Build:    2026-05-18 09:37:01 UTC
-# Commit:   e65c620
+# Build:    2026-05-27 15:28:59 UTC
+# Commit:   3cd7e1e
 #
 
 set -uo pipefail
@@ -15,13 +15,14 @@ set -uo pipefail
 # 全局常量
 # ==============================================================================
 
-SCRIPT_VERSION="1.1.0"
-
+SCRIPT_VERSION="1.2.0"
+SCRIPT_NAME="renewx.sh"
+INSTALL_PATH="/usr/local/bin/renewx"
 CONTAINER_NAME="renewx"
 IMAGE_NAME="gladtbam/ms365_e5_renewx:latest"
 
 # 脚本自更新源
-SCRIPT_URL="https://raw.githubusercontent.com/Leovikii/shell/main/renewx/renewx.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/Leovikii/sh/main/renewx/renewx.sh"
 
 # 数据目录
 DATA_ROOT="/opt/renewx"
@@ -90,13 +91,14 @@ sys::require_root() {
 
 sys::require_docker() {
     if ! sys::has_cmd docker; then
-        log::err "未检测到 Docker，请先安装 Docker (可用 sm.sh -> 安装常用软件)"
-        exit 1
+        log::err "未检测到 Docker，请先安装 Docker (可用主菜单 -> 安装环境依赖)"
+        return 1
     fi
     if ! docker info &>/dev/null; then
         log::err "Docker 守护进程未运行，请先启动: systemctl start docker"
-        exit 1
+        return 1
     fi
+    return 0
 }
 
 # ==============================================================================
@@ -307,6 +309,8 @@ renewx::prepare() {
 
 # 部署/启动：合并目录创建、密码设置、镜像拉取、容器创建
 renewx::deploy() {
+    sys::require_docker || return 1
+
     if renewx::running; then
         log::info "容器已在运行中"
         return 0
@@ -535,7 +539,129 @@ renewx::uninstall() {
         fi
     fi
 
-    log::info "RenewX 已卸载"
+    # 清理快捷指令
+    if [[ -n "${INSTALL_PATH:-}" && -f "$INSTALL_PATH" ]]; then
+        rm -f "$INSTALL_PATH"
+        log::info "全局快捷指令 ($INSTALL_PATH) 已移除"
+    fi
+
+    if sys::has_cmd caddy; then
+        echo
+        log::warn "检测到系统安装了 Caddy 环境。"
+        if ui::confirm "是否连同 Caddy 一起彻底卸载并清理配置？(慎重，可能影响其他业务)"; then
+            log::step "卸载 Caddy..."
+            systemctl stop caddy 2>/dev/null || true
+            systemctl disable caddy 2>/dev/null || true
+            apt-get purge -y caddy >/dev/null 2>&1
+            rm -rf /etc/caddy /usr/share/caddy /var/lib/caddy /var/log/caddy
+            log::info "Caddy 已被彻底清理"
+        fi
+    fi
+
+    if sys::has_cmd docker; then
+        echo
+        log::warn "检测到系统安装了 Docker 引擎。"
+        if ui::confirm "是否连同 Docker 一起彻底卸载并清理数据目录？(高危，将丢失所有容器数据)"; then
+            log::step "卸载 Docker..."
+            systemctl stop docker 2>/dev/null || true
+            systemctl disable docker 2>/dev/null || true
+            apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin docker.io >/dev/null 2>&1
+            rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+            log::info "Docker 引擎及数据已被彻底清理"
+        fi
+    fi
+
+    log::info "RenewX 相关组件及脚本清理已完成！"
+}
+
+# ==============================================================================
+# 环境依赖管理 (Docker / Caddy)
+# ==============================================================================
+
+env::install_docker() {
+    log::info "准备安装 Docker 环境..."
+    if sys::has_cmd docker; then
+        log::warn "Docker 已安装，跳过。"
+        return
+    fi
+    log::step "使用官方脚本安装 Docker..."
+    curl -fsSL https://get.docker.com | bash || { log::err "Docker 安装失败"; return 1; }
+    systemctl enable --now docker
+    log::info "Docker 安装完成并已启动。"
+}
+
+env::install_caddy() {
+    log::info "准备安装 Caddy 及配置反代..."
+    if ! sys::has_cmd caddy; then
+        log::step "安装 Caddy (Debian 官方源)..."
+        apt-get update
+        apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+        apt-get update
+        apt-get install -y caddy || { log::err "Caddy 安装失败"; return 1; }
+    else
+        log::info "Caddy 已安装，跳过安装步骤。"
+    fi
+
+    log::step "写入 Caddy 反代配置..."
+    local domain
+    ui::prompt "请输入需要绑定并反代的外部域名 (含端口，如 my.domain.com:8443): " domain
+    if [[ -z "$domain" ]]; then
+        log::warn "未输入域名，取消反代配置生成。"
+        return
+    fi
+
+    # 确保 /etc/caddy 和 sites.d 存在
+    mkdir -p /etc/caddy/sites.d
+    
+    # 确保默认的 Caddyfile 包含了 import /etc/caddy/sites.d/*.caddy
+    if [[ -f /etc/caddy/Caddyfile ]] && ! grep -q 'import /etc/caddy/sites.d/\*.caddy' /etc/caddy/Caddyfile; then
+        echo -e "\nimport /etc/caddy/sites.d/*.caddy" >> /etc/caddy/Caddyfile
+    elif [[ ! -f /etc/caddy/Caddyfile ]]; then
+        echo "import /etc/caddy/sites.d/*.caddy" > /etc/caddy/Caddyfile
+    fi
+
+    # 写入 renewx 专属配置
+    cat > /etc/caddy/sites.d/renewx.caddy << EOF
+${domain} {
+    reverse_proxy 127.0.0.1:1066 {
+        # 告诉后端："外部用户使用的是 443 端口，请按这个生成跳转链接"
+        header_up X-Forwarded-Port 443
+    }
+
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+}
+EOF
+    
+    log::info "配置已写入: /etc/caddy/sites.d/renewx.caddy"
+    log::warn "请确保您已手动将证书放置在: /etc/caddy/certs/cert.pem 和 key.pem"
+    if ui::confirm "是否立即重启 Caddy 服务以应用配置?"; then
+        systemctl restart caddy && log::info "Caddy 已重启。"
+    fi
+}
+
+env::menu() {
+    while true; do
+        ui::clear
+        echo -e "════════════════════════════════════════════════"
+        echo -e "          ${BLUE}常用环境与依赖安装${PLAIN}"
+        echo -e "════════════════════════════════════════════════"
+        echo -e "  ${GREEN}1.${PLAIN} 安装 Docker (官方源)"
+        echo -e "  ${GREEN}2.${PLAIN} 安装 Caddy  (官方源) + 配置反代"
+        echo -e "  ${GREEN}0.${PLAIN} 返回主菜单"
+        ui::divider
+        echo
+        local opt
+        ui::prompt " 请输入选项 [0-2]: " opt
+        case "$opt" in
+            1) env::install_docker ;;
+            2) env::install_caddy ;;
+            0) return 0 ;;
+            *) log::err "无效选项" ;;
+        esac
+        ui::pause
+    done
 }
 
 # ==============================================================================
@@ -559,32 +685,34 @@ menu::main() {
         echo -e " 监听地址 : ${BLUE}${HOST_BIND}:${port}${PLAIN}"
         echo -e " 数据目录 : ${CYAN}${DATA_ROOT}${PLAIN}"
         ui::divider
-        echo -e "  ${GREEN}1.${PLAIN} 部署 / 启动容器 ${YELLOW}(自动初始化目录与配置)${PLAIN}"
-        echo -e "  ${GREEN}2.${PLAIN} 停止容器"
-        echo -e "  ${GREEN}3.${PLAIN} 重启容器"
-        echo -e "  ${GREEN}4.${PLAIN} 查看实时日志 (Ctrl+C 返回菜单)"
-        echo -e "  ${GREEN}5.${PLAIN} 编辑 Config.xml"
+        echo -e "  ${GREEN}1.${PLAIN} 安装环境依赖 (Docker / Caddy)"
+        echo -e "  ${GREEN}2.${PLAIN} 部署 / 启动容器 ${YELLOW}(自动初始化目录与配置)${PLAIN}"
+        echo -e "  ${GREEN}3.${PLAIN} 停止容器"
+        echo -e "  ${GREEN}4.${PLAIN} 重启容器"
+        echo -e "  ${GREEN}5.${PLAIN} 查看实时日志 (Ctrl+C 返回菜单)"
+        echo -e "  ${GREEN}6.${PLAIN} 编辑 Config.xml"
         ui::divider
-        echo -e "  ${GREEN}6.${PLAIN} 在线更新本脚本"
-        echo -e "  ${GREEN}7.${PLAIN} 备份数据目录"
-        echo -e "  ${GREEN}8.${PLAIN} 显示访问信息"
+        echo -e "  ${GREEN}7.${PLAIN} 在线更新本脚本"
+        echo -e "  ${GREEN}8.${PLAIN} 备份数据目录"
+        echo -e "  ${GREEN}9.${PLAIN} 显示访问信息"
         ui::divider
-        echo -e "  ${GREEN}9.${PLAIN} 卸载 (容器 / 镜像 / 数据)"
+        echo -e "  ${GREEN}10.${PLAIN} 卸载 (容器 / 镜像 / 数据 / 快捷指令)"
         echo -e "  ${GREEN}0.${PLAIN} 退出"
         ui::divider
         echo
         local opt
-        ui::prompt " 请输入选项 [0-9]: " opt
+        ui::prompt " 请输入选项 [0-10]: " opt
         case "$opt" in
-            1)  renewx::deploy ;;
-            2)  renewx::stop ;;
-            3)  renewx::restart ;;
-            4)  renewx::logs ;;
-            5)  renewx::edit_config ;;
-            6)  renewx::update_script ;;
-            7)  renewx::backup ;;
-            8)  renewx::show_access ;;
-            9)  renewx::uninstall ;;
+            1)  env::menu ;;
+            2)  renewx::deploy ;;
+            3)  renewx::stop ;;
+            4)  renewx::restart ;;
+            5)  renewx::logs ;;
+            6)  renewx::edit_config ;;
+            7)  renewx::update_script ;;
+            8)  renewx::backup ;;
+            9)  renewx::show_access ;;
+            10) renewx::uninstall ;;
             0)  exit 0 ;;
             *)  log::err "无效选项，请重新输入" ;;
         esac
@@ -596,9 +724,23 @@ menu::main() {
 # 入口
 # ==============================================================================
 
+# ==============================================================================
+# 快捷指令自启动安装
+# ==============================================================================
+
+sys::install_shortcut() {
+    local self
+    self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    if [[ "$self" != "$INSTALL_PATH" ]]; then
+        if cp "$self" "$INSTALL_PATH" 2>/dev/null; then
+            chmod +x "$INSTALL_PATH"
+        fi
+    fi
+}
+
 main() {
     sys::require_root
-    sys::require_docker
+    sys::install_shortcut
     menu::main "$@"
 }
 

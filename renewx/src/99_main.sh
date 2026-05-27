@@ -2,9 +2,23 @@
 # 入口
 # ==============================================================================
 
+# ==============================================================================
+# 快捷指令自启动安装
+# ==============================================================================
+
+sys::install_shortcut() {
+    local self
+    self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+    if [[ "$self" != "$INSTALL_PATH" ]]; then
+        if cp "$self" "$INSTALL_PATH" 2>/dev/null; then
+            chmod +x "$INSTALL_PATH"
+        fi
+    fi
+}
+
 main() {
     sys::require_root
-    sys::require_docker
+    sys::install_shortcut
     menu::main "$@"
 }
 

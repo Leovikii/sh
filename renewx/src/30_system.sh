@@ -10,11 +10,12 @@ sys::require_root() {
 
 sys::require_docker() {
     if ! sys::has_cmd docker; then
-        log::err "未检测到 Docker，请先安装 Docker (可用 sm.sh -> 安装常用软件)"
-        exit 1
+        log::err "未检测到 Docker，请先安装 Docker (可用主菜单 -> 安装环境依赖)"
+        return 1
     fi
     if ! docker info &>/dev/null; then
         log::err "Docker 守护进程未运行，请先启动: systemctl start docker"
-        exit 1
+        return 1
     fi
+    return 0
 }

@@ -2,13 +2,14 @@
 # 全局常量
 # ==============================================================================
 
-SCRIPT_VERSION="1.1.0"
-
+SCRIPT_VERSION="1.2.0"
+SCRIPT_NAME="renewx.sh"
+INSTALL_PATH="/usr/local/bin/renewx"
 CONTAINER_NAME="renewx"
 IMAGE_NAME="gladtbam/ms365_e5_renewx:latest"
 
 # 脚本自更新源
-SCRIPT_URL="https://raw.githubusercontent.com/Leovikii/shell/main/renewx/renewx.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/Leovikii/sh/main/renewx/renewx.sh"
 
 # 数据目录
 DATA_ROOT="/opt/renewx"
