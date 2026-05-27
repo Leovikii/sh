@@ -5,8 +5,8 @@
 # 由 build.sh 自动拼接生成，请勿直接编辑本文件。
 # 源码位于 src/ 与 assets/，运行 `bash build.sh` 重新生成。
 #
-# Build:    2026-05-27 15:32:16 UTC
-# Commit:   8c72713
+# Build:    2026-05-27 16:04:44 UTC
+# Commit:   68bcff6
 #
 
 set -uo pipefail
@@ -712,19 +712,18 @@ menu::main() {
         ui::prompt " 请输入选项 [0-10]: " opt
         case "$opt" in
             1)  env::menu ;;
-            2)  renewx::deploy ;;
-            3)  renewx::stop ;;
-            4)  renewx::restart ;;
+            2)  renewx::deploy; ui::pause ;;
+            3)  renewx::stop; ui::pause ;;
+            4)  renewx::restart; ui::pause ;;
             5)  renewx::logs ;;
-            6)  renewx::edit_config ;;
-            7)  renewx::update_script ;;
-            8)  renewx::backup ;;
-            9)  renewx::show_access ;;
-            10) renewx::uninstall ;;
+            6)  renewx::edit_config; ui::pause ;;
+            7)  renewx::update_script; ui::pause ;;
+            8)  renewx::backup; ui::pause ;;
+            9)  renewx::show_access; ui::pause ;;
+            10) renewx::uninstall; ui::pause ;;
             0)  exit 0 ;;
-            *)  log::err "无效选项，请重新输入" ;;
+            *)  log::err "无效选项，请重新输入"; ui::pause ;;
         esac
-        ui::pause
     done
 }
 
