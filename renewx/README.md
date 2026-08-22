@@ -1,15 +1,26 @@
-# sh
+# RenewX 管理脚本
 
-One-shot management scripts for Linux servers. Run as `root`.
+## 功能
 
-## renewx.sh — MS365 E5 RenewX deployer
+- 部署、启动、停止、重启和更新 RenewX 容器，更新失败时自动回滚。
+- 生成安全的 `Config.xml`，编辑配置、查看日志和显示访问地址。
+- 安装 Docker/Caddy、配置 Caddy 反向代理及在线更新管理脚本。
+- 一致性备份 `/opt/renewx`，安全卸载 RenewX 并保留共享的 Docker/Caddy 环境。
 
-One-shot deploy of `gladtbam/ms365_e5_renewx`. `Config.xml` is embedded in the script — no extra files needed.
+## 下载
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Leovikii/sh/main/renewx/renewx.sh)
+curl -fLo renewx.sh https://raw.githubusercontent.com/Leovikii/sh/main/renewx/renewx.sh
 ```
 
-Requires Docker (install via the environment menu in this script). Choose menu **[2]** to deploy — you'll be prompted to set the admin password interactively (no default password is shipped).
+中国大陆网络可使用 CDN 加速：
 
-Data lives at `/opt/renewx/`. Container listens on `127.0.0.1:1066` — put a reverse proxy in front for external access (remember to forward `Host` and `X-Forwarded-Proto` headers).
+```bash
+curl -fLo renewx.sh https://cdn.jsdelivr.net/gh/Leovikii/sh@main/renewx/renewx.sh
+```
+
+## 运行
+
+```bash
+chmod +x renewx.sh && sudo ./renewx.sh
+```
