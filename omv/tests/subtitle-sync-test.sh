@@ -58,14 +58,13 @@ INPUT=$(printf '%s\n1\ny\n\n' "$TEST_DIR/media/Episode 01.mkv")
 sync_subtitle > "$TEST_DIR/log" <<< "$INPUT"
 [[ $(cat "$OUTPUT") == existing ]]
 
-# 明确备份后替换，源字幕也可以是目标自身。
+# 明确覆盖，源字幕也可以是目标自身，不生成备份。
 INPUT=$(printf '%s\n1\ny\ny\n' "$TEST_DIR/media/Episode 01.mkv")
 sync_subtitle > "$TEST_DIR/log" <<< "$INPUT"
 [[ $(cat "$OUTPUT") == existing ]]
-BACKUPS=("$OUTPUT".bak.*)
-[[ -f ${BACKUPS[0]} && $(cat "${BACKUPS[0]}") == existing ]]
+[[ -z $(find "$TEST_DIR/media" -name '*.bak.*' -print) ]]
 
-# 独立源字幕替换目标，并保留替换前内容。
+# 独立源字幕替换目标，仍保留源字幕。
 INPUT=$(printf '%s\n2\ny\ny\n' "$TEST_DIR/media/Episode 01.mkv")
 sync_subtitle > "$TEST_DIR/log" <<< "$INPUT"
 [[ $(cat "$OUTPUT") == 'source A' && $(cat "$TEST_DIR/media/a.SRT") == 'source A' ]]
@@ -96,4 +95,55 @@ install_python_packages() {
 expect_failure update_components > "$TEST_DIR/log" 2>&1
 [[ ! $UPDATE_BACKUP && ! -e $VENV_DIR/new-dependency ]]
 grep -q '^#!/bin/sh$' "$VENV_DIR/bin/ffs"
-printf 'PASS: selection, paths, output, backup, failure, conflict, update rollback\n'
+[[ -z $(find "$TEST_DIR/media" -name '.subtitle-sync.*' -print) ]]
+
+# 脚本更新只接受合法的新版本，失败和取消均保留当前脚本。
+SCRIPT_PATH="$TEST_DIR/current.sh"
+LINK_NAME="$TEST_DIR/subsync"
+LEGACY_LINK_NAME="$TEST_DIR/old-subtitle-sync"
+REMOTE_FIXTURE="$TEST_DIR/remote.sh"
+printf "#!/usr/bin/env bash\n# subtitle-sync managed entry\nSCRIPT_VERSION='1.0.0'\n" > "$SCRIPT_PATH"
+cp "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+cp "$SCRIPT_PATH" "$REMOTE_FIXTURE"
+curl() {
+    [[ ${DOWNLOAD_FAIL:-0} == 0 ]] || return 1
+    cp -- "$REMOTE_FIXTURE" "${@: -1}"
+}
+self_update > "$TEST_DIR/log" <<< ''
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+printf "#!/usr/bin/env bash\n# subtitle-sync managed entry\nSCRIPT_VERSION='1.1.0'\n" > "$REMOTE_FIXTURE"
+self_update > "$TEST_DIR/log" <<< ''
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+DOWNLOAD_FAIL=1
+expect_failure self_update > "$TEST_DIR/log" 2>&1 <<< y
+DOWNLOAD_FAIL=0
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+printf '<html>not a script</html>' > "$REMOTE_FIXTURE"
+expect_failure self_update > "$TEST_DIR/log" 2>&1 <<< y
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+printf "#!/usr/bin/env bash\n# subtitle-sync managed entry\nSCRIPT_VERSION='1.1.0'\nif\n" > "$REMOTE_FIXTURE"
+expect_failure self_update > "$TEST_DIR/log" 2>&1 <<< y
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+printf "#!/usr/bin/env bash\n# subtitle-sync managed entry\nSCRIPT_VERSION='0.9.0'\n" > "$REMOTE_FIXTURE"
+self_update > "$TEST_DIR/log" <<< y
+cmp -s "$SCRIPT_PATH" "$TEST_DIR/original.sh"
+printf "#!/usr/bin/env bash\n# subtitle-sync managed entry\nSCRIPT_VERSION='1.1.0'\n" > "$REMOTE_FIXTURE"
+self_update > "$TEST_DIR/log" <<< y
+cmp -s "$SCRIPT_PATH" "$REMOTE_FIXTURE"
+[[ ! $SCRIPT_DOWNLOAD && ! $SCRIPT_STAGE ]]
+[[ -z $(find "$TEST_DIR" -name '.subtitle-sync-update.*' -print) ]]
+
+# 快捷命令安装、取消卸载、确认卸载和外部命令保护。
+cp "$SCRIPT_PATH" "$LEGACY_LINK_NAME"
+install_shortcut > "$TEST_DIR/log"
+cmp -s "$SCRIPT_PATH" "$LINK_NAME"
+[[ ! -e $LEGACY_LINK_NAME ]]
+uninstall_script > "$TEST_DIR/log" <<< ''
+[[ -f $LINK_NAME ]]
+uninstall_script > "$TEST_DIR/log" <<< y
+[[ ! -e $LINK_NAME && -f $SCRIPT_PATH && -d $VENV_DIR ]]
+printf 'unrelated command' > "$LINK_NAME"
+expect_failure install_shortcut > "$TEST_DIR/log" 2>&1
+expect_failure uninstall_script > "$TEST_DIR/log" 2>&1 <<< y
+[[ $(cat "$LINK_NAME") == 'unrelated command' ]]
+printf 'PASS: selection, overwrite, cleanup, rollback, script update, shortcut lifecycle\n'

@@ -2,10 +2,15 @@
 # subtitle-sync managed entry
 # OMV / Debian：组件管理与单组字幕调轴。
 
+SCRIPT_VERSION='1.0.0'
+SCRIPT_URL='https://raw.githubusercontent.com/Leovikii/sh/main/omv/subtitle-sync.sh'
 VENV_DIR=/opt/ffsubsync-venv
-LINK_NAME=/usr/local/bin/subtitle-sync
+LINK_NAME=/usr/local/bin/subsync
+LEGACY_LINK_NAME=/usr/local/bin/subtitle-sync
 SCRIPT_PATH=$(readlink -f -- "${BASH_SOURCE[0]}")
 TEMP_SUB=''
+SCRIPT_DOWNLOAD=''
+SCRIPT_STAGE=''
 UPDATE_BACKUP=''
 GREEN='' YELLOW='' RED='' RESET=''
 if [[ -t 1 && ${TERM:-dumb} != dumb && ! ${NO_COLOR+x} ]]; then
@@ -18,6 +23,8 @@ header() { printf '\n%s\n──────────────────�
 
 cleanup() {
     [[ ! $TEMP_SUB ]] || rm -f -- "$TEMP_SUB"
+    [[ ! $SCRIPT_DOWNLOAD ]] || rm -f -- "$SCRIPT_DOWNLOAD"
+    [[ ! $SCRIPT_STAGE ]] || rm -f -- "$SCRIPT_STAGE"
     if [[ $UPDATE_BACKUP && -d $UPDATE_BACKUP ]]; then
         # 保留原路径，确保虚拟环境中的绝对路径仍有效。
         rm -rf -- "$VENV_DIR" && mv -- "$UPDATE_BACKUP" "$VENV_DIR"
@@ -75,9 +82,6 @@ install_components() {
     if [[ -e $VENV_DIR ]] && ! owned_venv; then
         error "拒绝修改非本工具管理的目录：$VENV_DIR"; return 1
     fi
-    if [[ -e $LINK_NAME || -L $LINK_NAME ]] && ! grep -q '^# subtitle-sync managed entry$' "$LINK_NAME" 2>/dev/null; then
-        error "快捷命令已被其他工具占用：$LINK_NAME"; return 1
-    fi
     for pkg in ffmpeg python3 python3-venv; do
         [[ $(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null) == 'install ok installed' ]] || missing+=("$pkg")
     done
@@ -87,10 +91,8 @@ install_components() {
     mkdir -p -- "$VENV_DIR" && touch "$VENV_DIR/.subtitle-sync-owned" || return 1
     python3 -m venv "$VENV_DIR" || return 1
     install_python_packages || return 1
-    if [[ $SCRIPT_PATH != "$LINK_NAME" ]]; then
-        install -m 755 -- "$SCRIPT_PATH" "$LINK_NAME" || return 1
-    fi
-    printf '%s安装完成，可运行 subtitle-sync。%s\n' "$GREEN" "$RESET"
+    install_shortcut || return 1
+    printf '%s安装完成，可运行 subsync。%s\n' "$GREEN" "$RESET"
 }
 
 install_python_packages() {
@@ -99,6 +101,84 @@ install_python_packages() {
     "$VENV_DIR/bin/python" -m pip check && ready || {
         error '组件验证失败，请检查上面的安装信息。'; return 1
     }
+}
+
+install_shortcut() {
+    # 迁移最初版本的 subsync 链接，不能沿链接覆盖原下载文件。
+    if [[ -L $LINK_NAME && $(readlink -- "$LINK_NAME") == */install_subsync.sh ]] &&
+        grep -q '^VENV_DIR="/opt/ffsubsync-venv"$' "$LINK_NAME" 2>/dev/null; then
+        rm -f -- "$LINK_NAME" || return 1
+    fi
+    if [[ -e $LINK_NAME || -L $LINK_NAME ]] &&
+        { [[ -L $LINK_NAME ]] || ! grep -qxF '# subtitle-sync managed entry' "$LINK_NAME"; }; then
+        error "快捷命令已被其他工具占用：$LINK_NAME"; return 1
+    fi
+    [[ $SCRIPT_PATH != "$LINK_NAME" ]] || return 0
+    install -m 755 -- "$SCRIPT_PATH" "$LINK_NAME" || return 1
+    if [[ -f $LEGACY_LINK_NAME && ! -L $LEGACY_LINK_NAME ]] &&
+        grep -qxF '# subtitle-sync managed entry' "$LEGACY_LINK_NAME"; then
+        rm -f -- "$LEGACY_LINK_NAME" || return 1
+    fi
+    printf '已安装快捷命令：subsync\n'
+}
+
+uninstall_script() {
+    local answer
+    printf '将删除 subsync 快捷命令；保留组件和下载的脚本文件。\n'
+    read -r -p '确认卸载脚本？[y/N]：' answer || return 1
+    [[ $answer == [yY] ]] || return 0
+    if [[ -e $LINK_NAME || -L $LINK_NAME ]]; then
+        [[ ! -L $LINK_NAME ]] && grep -qxF '# subtitle-sync managed entry' "$LINK_NAME" || {
+            error '快捷命令不属于本工具，拒绝删除。'; return 1
+        }
+        rm -f -- "$LINK_NAME" || return 1
+    fi
+    printf '脚本已卸载。再次运行下载文件可重新安装快捷命令。\n'
+}
+
+self_update() {
+    local remote_version answer
+    SCRIPT_DOWNLOAD=$(mktemp) || return 1
+    if command -v curl >/dev/null; then
+        curl -fsSL --connect-timeout 10 --max-time 60 "$SCRIPT_URL" -o "$SCRIPT_DOWNLOAD"
+    elif command -v wget >/dev/null; then
+        wget -q --timeout=30 --tries=1 -O "$SCRIPT_DOWNLOAD" "$SCRIPT_URL"
+    else
+        error '检查更新需要 curl 或 wget。'
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 1
+    fi
+    if (( $? != 0 )); then
+        error '下载失败，当前脚本未修改。'
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 1
+    fi
+    remote_version=$(sed -n "s/^SCRIPT_VERSION='\([0-9]\+\.[0-9]\+\.[0-9]\+\)'$/\1/p" "$SCRIPT_DOWNLOAD")
+    if [[ ! $remote_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+        ! grep -qxF '# subtitle-sync managed entry' "$SCRIPT_DOWNLOAD" || ! bash -n "$SCRIPT_DOWNLOAD"; then
+        error '下载文件的版本、标记或语法无效，当前脚本未修改。'
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 1
+    fi
+    printf '当前版本  %s\n仓库版本  %s\n' "$SCRIPT_VERSION" "$remote_version"
+    if [[ $remote_version == "$SCRIPT_VERSION" || $(printf '%s\n' "$SCRIPT_VERSION" "$remote_version" | sort -V | tail -n 1) != "$remote_version" ]]; then
+        printf '当前已是最新版本。\n'
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 0
+    fi
+    read -r -p '更新当前脚本？[y/N]：' answer || answer=''
+    if [[ $answer != [yY] ]]; then
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 0
+    fi
+    SCRIPT_STAGE=$(mktemp "${SCRIPT_PATH%/*}/.subtitle-sync-update.XXXXXX") || {
+        error '脚本目录不可写，请使用 sudo bash subtitle-sync.sh self-update。'
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''; return 1
+    }
+    if cp -- "$SCRIPT_DOWNLOAD" "$SCRIPT_STAGE" &&
+        chmod --reference="$SCRIPT_PATH" -- "$SCRIPT_STAGE" && mv -f -- "$SCRIPT_STAGE" "$SCRIPT_PATH"; then
+        SCRIPT_STAGE=''
+        rm -f -- "$SCRIPT_DOWNLOAD"; SCRIPT_DOWNLOAD=''
+        printf '%s已更新至 %s，请重新启动脚本。%s\n' "$GREEN" "$remote_version" "$RESET"
+    else
+        error '更新失败，当前脚本未修改。'
+        rm -f -- "$SCRIPT_DOWNLOAD" "$SCRIPT_STAGE"; SCRIPT_DOWNLOAD='' SCRIPT_STAGE=''; return 1
+    fi
 }
 
 update_components() {
@@ -123,23 +203,16 @@ update_components() {
 
 uninstall_components() {
     local answer
-    printf '将删除工具专用环境及快捷命令；保留系统组件和字幕。\n'
+    printf '将删除 FFsubsync 专用环境；保留菜单脚本、系统组件和字幕。\n'
     read -r -p '确认卸载？[y/N]：' answer || return 1
     [[ $answer == [yY] ]] || { printf '已取消。\n'; return 0; }
     if [[ -e $VENV_DIR ]]; then
         owned_venv || { error "拒绝删除非本工具管理的目录：$VENV_DIR"; return 1; }
         rm -rf -- "$VENV_DIR" || return 1
     fi
-    if [[ -f $LINK_NAME ]] && grep -q '^# subtitle-sync managed entry$' "$LINK_NAME"; then
-        rm -f -- "$LINK_NAME" || return 1
-    fi
     # 兼容旧脚本：仅清理指向旧专用环境的包装命令。
     if [[ -f /usr/local/bin/ffs ]] && grep -qxF 'exec /opt/ffsubsync-venv/bin/ffs "$@"' /usr/local/bin/ffs; then
         rm -f -- /usr/local/bin/ffs || return 1
-    fi
-    if [[ -L /usr/local/bin/subsync && $(readlink -- /usr/local/bin/subsync) == */install_subsync.sh ]] &&
-        grep -q '^VENV_DIR="/opt/ffsubsync-venv"$' /usr/local/bin/subsync 2>/dev/null; then
-        rm -f -- /usr/local/bin/subsync || return 1
     fi
     printf '%s卸载完成。%s\n' "$GREEN" "$RESET"
 }
@@ -208,7 +281,7 @@ select_subtitle() {
 }
 
 sync_subtitle() {
-    local video subtitle dir base ext output answer backup='' start status
+    local video subtitle dir base ext output answer overwrite=false start status
     ready || { error '组件未就绪，请先安装 / 修复组件。'; return 1; }
     header '开始调轴'
     printf '请输入 NAS 上的路径；支持 Tab 补全，空输入返回。\n'
@@ -232,23 +305,21 @@ sync_subtitle() {
     [[ -w $dir ]] || { error '视频所在目录不可写。'; return 1; }
     if [[ -e $output || -L $output ]]; then
         [[ -f $output && ! -L $output ]] || { error '目标不是普通文件或是符号链接，拒绝替换。'; return 1; }
-        printf '%s目标已存在，必须备份后才能替换。%s\n' "$YELLOW" "$RESET"
-        read -r -p '备份后替换？[y/N]：' answer || return 0
+        printf '%s目标已存在，覆盖后不保留旧字幕。%s\n' "$YELLOW" "$RESET"
+        read -r -p '确认覆盖？[y/N]：' answer || return 0
         [[ $answer == [yY] ]] || return 0
-        backup=$(mktemp "$output.bak.XXXXXX") || return 1
-        cp -p -- "$output" "$backup" || { rm -f -- "$backup"; return 1; }
-        printf '备份  %s\n' "$backup"
+        overwrite=true
     fi
     TEMP_SUB=$(mktemp "$dir/.subtitle-sync.XXXXXX.$ext") || return 1
     start=$SECONDS
     if "$VENV_DIR/bin/ffs" "$video" -i "$subtitle" -o "$TEMP_SUB" && [[ -s $TEMP_SUB ]]; then
-        # 新文件继承字幕权限，替换时继承目标权限，供 NAS 播放器读取。
-        if ! chmod --reference="${backup:-$subtitle}" -- "$TEMP_SUB"; then
+        # 继承源字幕权限，供 NAS 播放器读取。
+        if ! chmod --reference="$subtitle" -- "$TEMP_SUB"; then
             error '无法设置输出权限，原文件保留。'
             rm -f -- "$TEMP_SUB"; TEMP_SUB=''; return 1
         fi
         # 无覆盖授权时，用硬链接原子发布，避免执行期间新文件被覆盖。
-        if [[ $backup ]]; then
+        if $overwrite; then
             [[ ! -L $output && ! -d $output ]] && mv -f -- "$TEMP_SUB" "$output"
         else
             ln -- "$TEMP_SUB" "$output" && rm -f -- "$TEMP_SUB"
@@ -259,7 +330,7 @@ sync_subtitle() {
             printf '\n%s调轴完成%s\n输出  %s\n耗时  %s 秒\n' "$GREEN" "$RESET" "$output" "$((SECONDS - start))"
             return 0
         fi
-        error '写入结果失败，原文件及备份保留。'
+        error '写入结果失败。'
     else
         error '调轴失败或输出为空，原字幕保留。'
     fi
@@ -284,26 +355,63 @@ components_menu() {
     done
 }
 
+script_menu() {
+    local choice
+    while true; do
+        header "脚本管理 · v$SCRIPT_VERSION"
+        printf '  1  检查并更新脚本\n  2  卸载脚本\n\n  0  返回\n'
+        read -r -p '选择 [0–2]：' choice || return 0
+        case $choice in
+            1)
+                if [[ -w ${SCRIPT_PATH%/*} ]]; then self_update
+                else as_admin self_update self-update; fi
+                grep -qxF "SCRIPT_VERSION='$SCRIPT_VERSION'" "$SCRIPT_PATH" || return 0
+                pause ;;
+            2)
+                as_admin uninstall_script uninstall-script
+                [[ -f $LINK_NAME ]] || return 0
+                pause ;;
+            0) return 0 ;;
+            *) error '无效选项。' ;;
+        esac
+    done
+}
+
 main() {
     local choice
     case ${1:-} in
         install) as_admin install_components install; return $? ;;
         update) as_admin update_components update; return $? ;;
+        self-update) self_update; return $? ;;
+        install-shortcut) as_admin install_shortcut install-shortcut; return $? ;;
+        uninstall-script) as_admin uninstall_script uninstall-script; return $? ;;
+        version|--version) printf '%s\n' "$SCRIPT_VERSION"; return 0 ;;
         uninstall) as_admin uninstall_components uninstall; return $? ;;
         status) show_status; return $? ;;
         sync) sync_subtitle; return $? ;;
         '') ;;
-        *) printf '用法：%s [install|update|uninstall|status|sync]\n' "${0##*/}"; return 1 ;;
+        *) printf '用法：%s [install|update|self-update|install-shortcut|uninstall-script|uninstall|status|sync|version]\n' "${0##*/}"; return 1 ;;
     esac
+    # 首次运行安装独立副本，此后从固定入口启动，避免更新到错误副本。
+    if [[ $SCRIPT_PATH != "$LINK_NAME" ]]; then
+        if ! { [[ ! -L $LINK_NAME ]] && grep -qxF '# subtitle-sync managed entry' "$LINK_NAME" 2>/dev/null &&
+            grep -q "^SCRIPT_VERSION='[0-9]" "$LINK_NAME"; }; then
+            as_admin install_shortcut install-shortcut || return 1
+        fi
+        exec bash "$LINK_NAME"
+    fi
     while true; do
-        header '字幕调轴 · FFsubsync'
+        header "字幕调轴 · v$SCRIPT_VERSION"
         if ready; then printf '%s组件状态：就绪%s\n' "$GREEN" "$RESET"
         else printf '%s组件状态：需要安装 / 修复%s\n' "$YELLOW" "$RESET"; fi
-        printf '\n  1  开始调轴\n  2  组件管理\n\n  0  退出\n'
-        read -r -p '选择 [0–2]：' choice || return 0
+        printf '\n  1  开始调轴\n  2  组件管理\n  3  脚本管理\n\n  0  退出\n'
+        read -r -p '选择 [0–3]：' choice || return 0
         case $choice in
             1) sync_subtitle; pause ;;
             2) components_menu ;;
+            3)
+                script_menu
+                [[ -f $LINK_NAME ]] && grep -qxF "SCRIPT_VERSION='$SCRIPT_VERSION'" "$SCRIPT_PATH" || return 0 ;;
             0) return 0 ;;
             *) error '无效选项。' ;;
         esac
