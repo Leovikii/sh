@@ -7,4 +7,5 @@
 | [`cachyos`](./cachyos/) | CachyOS 配置工具 |
 | [`omv`](./omv/) | OpenMediaVault 工具 |
 | [`renewx`](./renewx/) | RenewX 部署工具 |
+| [`rclone`](./rclone/) | Windows rclone 磁盘管理 v1.0.0，含 winget 组件安装/卸载 |
 | [`wrt`](./wrt/) | OpenWrt 工具 |
