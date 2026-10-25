@@ -1,57 +1,73 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <title>CachyOS 字体渲染测试</title>
-    <style>
-        body {
-            background-color: #1e1e2e;
-            color: #cdd6f4;
-            padding: 40px;
-        }
-        .test-block {
-            margin-bottom: 40px;
-            padding: 20px;
-            background: #313244;
-            border-radius: 8px;
-        }
-        h2 { border-bottom: 1px solid #585b70; padding-bottom: 10px; }
-        .sans { font-family: sans-serif; }
-        .serif { font-family: serif; }
-        .mono { font-family: monospace; }
-        
-        .w-normal { font-weight: 400; }
-        .w-bold { font-weight: 700; }
-        .w-heavy { font-weight: 900; }
-        .italic { font-style: italic; }
-        
-        p { font-size: 20px; margin: 10px 0; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CachyOS 中英文字体对比</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 1120px; margin: auto; padding: 24px; line-height: 1.65; }
+  body.light { color-scheme: light; background: #fff; color: #222; }
+  body.dark { color-scheme: dark; background: #1e1e2e; color: #cdd6f4; }
+  h1 { font-size: 26px; } h2 { font: 600 18px system-ui, sans-serif; }
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  select, input { font: inherit; } select { padding: 6px; }
+  section { border: 1px solid #8887; border-radius: 10px; padding: 16px; margin: 20px 0; }
+  .sample { font-size: var(--sample-size, 16px); }
+  .sample p { margin: 10px 0; }
+  .sans { font-family: sans-serif; } .serif { font-family: serif; }
+  .mono { font-family: monospace; white-space: pre; overflow-x: auto; }
+  .noto { font-family: "Noto Sans CJK SC", sans-serif; }
+  .sarasa { font-family: "Sarasa UI SC", sans-serif; }
+  .sarasa-term { font-family: "Sarasa Term SC", monospace; }
+  .italic { font-style: italic; }
+  .wqy { font-family: "WenQuanYi Zen Hei", sans-serif; }
+  .bold { font-weight: 700; } .medium { font-weight: 500; }
+  .sizes p:nth-of-type(1) { font-size: 12px; } .sizes p:nth-of-type(2) { font-size: 14px; }
+  .sizes p:nth-of-type(3) { font-size: 16px; } .sizes p:nth-of-type(4) { font-size: 18px; }
+  .note { opacity: .8; font-size: 14px; }
+</style>
 </head>
 <body>
-
-    <div class="test-block sans">
-        <h2>无衬线体 (Sans-serif) - 更纱黑体 Sarasa UI SC</h2>
-        <p class="w-normal">常规 (400)：The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</p>
-        <p class="w-bold">粗体 (700)：The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</p>
-        <p class="w-normal italic">斜体 (Italic)：The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</p>
-    </div>
-
-    <div class="test-block serif">
-        <h2>衬线体 (Serif) - 霞鹜文楷 LXGW WenKai</h2>
-        <p class="w-normal">常规 (400)：The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</p>
-        <p class="w-bold">粗体 (700)：The quick brown fox jumps over the lazy dog. 敏捷的棕色狐狸跳过懒惰的狗。</p>
-    </div>
-
-    <div class="test-block mono">
-        <h2>等宽字体 (Monospace) - 更纱黑体终端版 Sarasa Term SC</h2>
-        <p class="w-normal">常规 (400)：func main() { fmt.Println("Hello, 世界") } // 严格的 2:1 中英对齐</p>
-        <p class="w-bold">粗体 (700)：func main() { fmt.Println("Hello, 世界") } // 严格的 2:1 中英对齐</p>
-        <p class="w-normal italic">斜体 (Italic)：func main() { fmt.Println("Hello, 世界") } // 严格的 2:1 中英对齐</p>
-        <p class="w-normal">| English | 中文对齐测试 |</p>
-        <p class="w-normal">|---------|--------------|</p>
-        <p class="w-normal">| 1234567 | 测试排版效果 |</p>
-    </div>
-
+<h1>中英文字体与渲染对比</h1>
+<p>请使用日常的 150% 系统缩放，浏览器页面缩放保持 100%。比较中文字形、笔画和标点；切换浅色和深色背景观察细字。</p>
+<p>脚本使用更纱：Sarasa UI SC 的英文基于 Inter，Sarasa Term SC 的英文基于 Iosevka。下方 Noto 和文泉驿仅作字形对比。</p>
+<div class="controls">
+  <label>样本文字大小 <input id="size" type="range" min="12" max="24" value="16"> <output id="size-value" for="size">16px</output></label>
+  <label>背景 <select id="theme"><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></label>
+</div>
+<p class="note">本页不加载网络字体。标题表示请求的字体；未安装时浏览器会回退，并不代表实际渲染字体。可在浏览器开发者工具的“渲染的字体 / Fonts”中核实。浏览器效果也不等同于所有 Qt、GTK 应用。</p>
+<section class="sample sans">
+<h2>系统默认 sans-serif（观察配置实际效果）</h2>
+<p>常规 400：微风轻拂，中文应该清晰自然。骨、直、令、门、永，标点：“你好，世界！”</p>
+<p class="medium">中等 500：设置、文件管理器、浏览器，混排 Linux / CachyOS 2026。</p>
+<p class="bold">粗体 700：敏捷的棕色狐狸跳过懒惰的狗。The quick brown fox jumps over the lazy dog.</p>
+</section>
+<section class="sample noto"><h2>Noto Sans CJK SC / 思源黑体同源字体</h2><p>微风轻拂，中文应该清晰自然。骨、直、令、门、永，标点：“你好，世界！”</p><p class="bold">设置、文件管理器、浏览器，混排 Linux / CachyOS 2026。</p></section>
+<section class="sample sarasa"><h2>更纱 UI 英文界面（基于 Inter）</h2><p lang="en">Settings · Files · Display Configuration · Search applications…</p><p lang="en">The quick brown fox jumps over the lazy dog. 0123456789 — “Hello, world!”</p><p class="medium">Medium 500: English labels 与中文菜单的字重、基线和标点。</p><p class="bold">Bold 700: Save changes · Cancel · Restore defaults</p><p class="italic" lang="en">Italic: Mixed language typography, version 1.0.43.</p></section>
+<section><h2>更纱 Term 英文代码（基于 Iosevka）</h2><pre class="sample mono sarasa-term">Il1 | O0 | [] {} () &lt;=&gt; != == -&gt;
+const message = "Hello, 世界";
+if (count &gt;= 10) { return count !== 0; }
+// Compare punctuation, spacing, and optional ligatures.</pre><p class="note">Term 可包含连字，是否显示取决于程序；想保留更纱又去掉连字时，可在终端或编辑器中关闭连字，或试用 Sarasa Fixed SC。</p></section>
+<section class="sample wqy"><h2>WenQuanYi Zen Hei / 文泉驿正黑（已安装时可作对照）</h2><p>微风轻拂，中文应该清晰自然。骨、直、令、门、永，标点：“你好，世界！”</p><p class="bold">设置、文件管理器、浏览器，混排 Linux / CachyOS 2026。</p></section>
+<section class="serif sample"><h2>系统默认 serif（推荐 Noto Serif CJK SC）</h2><p>宋体阅读：山川异域，风月同天。天地玄黄，宇宙洪荒。</p><p class="bold">粗体 700：中文段落与 Latin serif 0123456789。</p></section>
+<section class="sans sizes"><h2>小字号（固定 CSS 像素，不受上方滑块影响）</h2><p>12px：系统设置与中文菜单，永远保持清晰。Il1 O0 0123456789</p><p>14px：系统设置与中文菜单，永远保持清晰。Il1 O0 0123456789</p><p>16px：系统设置与中文菜单，永远保持清晰。Il1 O0 0123456789</p><p>18px：系统设置与中文菜单，永远保持清晰。Il1 O0 0123456789</p></section>
+<section><h2>等宽字体（保留空格；全角中文通常占两个拉丁字符宽度）</h2><pre class="sample mono">| English  | 中文对齐 |
+|----------|----------|
+| 12345678 | 测试排版 |
+| ABCDEFGH | 字体设置 |
+func main() { fmt.Println("Hello, 世界") }
+Il1 | O0 | [] {} () &lt;=&gt; != == -&gt;</pre></section>
+<section class="sample sans"><h2>地区字形与 Emoji 回退</h2><p lang="zh-CN">简体中文：骨、直、令、门，永远清晰。</p><p lang="zh-TW">繁體中文：骨、直、令、門，閱讀體驗。</p><p lang="zh-HK">香港繁體：骨、直、令、門，閱讀體驗。</p><p lang="ja">日本語：骨、直、令、門。こんにちは。</p><p lang="ko">한국어: 한글 글꼴 테스트.</p><p>彩色 Emoji：😀 😅 🐧 🌈 ❤️ 👍🏽 👨‍👩‍👧‍👦</p></section>
+<script>
+const size = document.getElementById('size');
+size.addEventListener('input', () => {
+  document.documentElement.style.setProperty('--sample-size', `${size.value}px`);
+  document.getElementById('size-value').value = `${size.value}px`;
+});
+document.getElementById('theme').addEventListener('change', event => {
+  document.body.className = event.target.value === 'system' ? '' : event.target.value;
+});
+</script>
 </body>
 </html>
