@@ -11,8 +11,8 @@
 bash cachyos/proton_setup.sh --print-config
 bash cachyos/proton_setup.sh --apply
 
-# 注销重登后，从应用菜单启动 Steam。
-# 不想立即注销：从 Steam 菜单完全退出 Steam，再执行：
+# 完全退出 Steam，再从应用菜单或标准 Steam 固定图标启动。
+# 也可直接用本次参数启动：
 bash cachyos/proton_setup.sh --steam
 
 # 检查显示设置、配置文件和 Steam 启动时继承的参数
@@ -22,9 +22,11 @@ bash cachyos/proton_setup.sh --diagnose
 bash cachyos/proton_setup.sh --restore
 ```
 
-`--apply` 写入 `${XDG_CONFIG_HOME:-~/.config}/environment.d/gaming.conf`；覆盖前保存完整文件或符号链接到 `${XDG_STATE_HOME:-~/.local/state}/cachyos-proton/backups/`。相同配置重复应用不增加备份。若此前已有 `gaming.conf`，该文件会整体备份、替换；其它配置文件不受影响。恢复也以整个文件为单位。参数作用于继承该环境的进程，包括之后安装的游戏和 Proton 版本，不依赖修改 Proton 安装目录。
+`--apply` 写入 `${XDG_CONFIG_HOME:-~/.config}/environment.d/gaming.conf`，并根据系统 `/usr/share/applications/steam.desktop` 生成 `${XDG_DATA_HOME:-~/.local/share}/applications/steam.desktop`。用户级入口会为每个启动动作直接传入本次参数，保留 Steam 链接、翻译和右键菜单；普通菜单启动不再依赖旧桌面会话是否继承了新变量。固定图标需指向标准 `steam.desktop`；自定义快捷方式、终端直接运行 `steam`、自动启动不一定经过此入口。
 
-`environment.d` 由 systemd 用户环境生成器处理，是否进入桌面进程还取决于会话如何启动。注销重登后请用诊断确认；仅 `daemon-reload` 或重启终端无法更新已运行的桌面、Steam。`--steam` 显式传递参数，便于立即测试；它使用**本次命令选项**生成参数，不读取 `gaming.conf`，自定义选项需再次传入。Flatpak 请用 `--steam --flatpak`，脚本通过 `flatpak run --env=...` 传入参数；本脚本不持久化 Flatpak overrides。
+两份文件覆盖前均保存完整文件或符号链接到 `${XDG_STATE_HOME:-~/.local/state}/cachyos-proton/backups/`，恢复时还原原文件；原先不存在的入口会删除。相同配置和入口重复应用不增加备份。若此前已有自定义用户级 Steam 入口，其内容会备份后整体替换。旧版备份只恢复 `gaming.conf`。参数作用于 Steam 启动的游戏，包括之后安装的游戏和 Proton 版本，不依赖修改 Proton 安装目录。系统 Steam 入口更新后可重新运行 `--apply` 同步。
+
+`environment.d` 由 systemd 用户环境生成器处理，是否进入桌面进程还取决于会话如何启动；其它入口通常仍需注销重登。仅 `daemon-reload` 或重启终端无法更新已运行的桌面、Steam。菜单入口和 `--steam` 均显式传递参数；已运行的 Steam 必须先完全退出。`--steam` 使用**本次命令选项**生成参数，不读取 `gaming.conf`，自定义选项需再次传入。持久菜单入口针对原生 Steam；Flatpak 请用 `--steam --flatpak`，脚本通过 `flatpak run --env=...` 传入参数，不持久化 Flatpak overrides。
 
 ### 默认参数和取舍
 
@@ -70,7 +72,7 @@ bash cachyos/proton_setup.sh --apply --fps 117 --cache-size 12G
 
 截至本次查阅，`vkd3d-low-latency` README 明确列出 **Anti-Lag 2、帧生成尚不支持**，并非适合所有 DX12 游戏的全局开关。因此默认关闭它。`--dx12-lowlatency` 自动省略 Anti-Lag 层；与显式的 `--anti-lag-layer` 同用会报错。可在单个游戏启动选项里设 `DISABLE_LOW_LATENCY_LAYER=1 PROTON_VKD3D_LOWLATENCY=1 %command%` 逐个测试，并关闭游戏内 Anti-Lag 2 和帧生成；支持的游戏可通过 Proton 日志里的 `waitable dxgi swapchain present percentage` 验证 Waitable Swapchains 路径。
 
-`--anti-lag-layer` 保留为显式开启选项。持久关闭可用 `--apply --no-anti-lag-layer` 后注销重登；仅某款游戏异常时，使用 `DISABLE_LOW_LATENCY_LAYER=1 %command%` 单独关闭。加载层、游戏菜单可选、实际发送 Anti-Lag 调用及测得延迟降低是不同验证步骤；游戏未调用接口时不能靠变量补上。脚本不设置 `LOW_LATENCY_LAYER_REFLEX=1`、`PROTON_FORCE_NVAPI=1` 或显卡厂商伪装；尤其 NVIDIA 伪装可能破坏 FSR 4 的 AMD 识别。Reflex 替代方案需要按具体游戏测试。`--steam` 会清除 Anti-Lag 层、FSR 水印及 `LOW_LATENCY_LAYER_REFLEX` 的旧会话残留，再按本次选项传入参数。
+`--anti-lag-layer` 保留为显式开启选项。持久关闭可用 `--apply --no-anti-lag-layer` 后完全退出 Steam，再从菜单启动；仅某款游戏异常时，使用 `DISABLE_LOW_LATENCY_LAYER=1 %command%` 单独关闭。加载层、游戏菜单可选、实际发送 Anti-Lag 调用及测得延迟降低是不同验证步骤；游戏未调用接口时不能靠变量补上。脚本不设置 `LOW_LATENCY_LAYER_REFLEX=1`、`PROTON_FORCE_NVAPI=1` 或显卡厂商伪装；尤其 NVIDIA 伪装可能破坏 FSR 4 的 AMD 识别。Reflex 替代方案需要按具体游戏测试。菜单入口和 `--steam` 会清除 Anti-Lag 层、FSR 水印及 `LOW_LATENCY_LAYER_REFLEX` 的旧会话残留，再按本次选项传入参数。
 
 《鬼武者：剑之道》已通过组合启动项解锁光追及 Anti-Lag 菜单，但尚未单独验证每个参数的贡献或测量输入延迟。其 `/WineDetectionEnabled:False` 是游戏参数，继续保留在该游戏的 `%command%` 后面；全局加载 Anti-Lag 层不能代替游戏自身的检测绕过。
 

@@ -6,6 +6,8 @@ set -euo pipefail
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/cachyos-proton"
 CONFIG_FILE="$CONFIG_HOME/environment.d/gaming.conf"
+DESKTOP_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/applications/steam.desktop"
+DESKTOP_SOURCE=/usr/share/applications/steam.desktop
 FPS=117
 CACHE_SIZE=12G
 DX12_LOWLATENCY=0
@@ -14,18 +16,22 @@ ANTI_LAG_LAYER=auto
 FSR_INDICATOR=false
 FLATPAK=false
 TEMPORARY=''
+DESKTOP_TEMPORARY=''
 GAMING_ENV=()
 
 die() { printf '错误：%s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; }
-cleanup() { [[ -z "$TEMPORARY" ]] || rm -f -- "$TEMPORARY"; }
+cleanup() {
+    [[ -z "$TEMPORARY" ]] || rm -f -- "$TEMPORARY"
+    [[ -z "$DESKTOP_TEMPORARY" ]] || rm -f -- "$DESKTOP_TEMPORARY"
+}
 
 usage() {
     cat <<'EOF'
 用法：bash proton_setup.sh 操作 [选项]
 操作（一次一个；无参数只显示帮助）：
-  --apply          备份后写入 ~/.config/environment.d/gaming.conf
-  --restore        恢复最近一次应用前的 gaming.conf
+  --apply          备份后写入环境配置和用户级 Steam 菜单入口
+  --restore        恢复最近一次应用前的配置和菜单入口
   --diagnose       只读检查配置、显示器与 Steam 启动时继承的环境
   --print-config   预览将生成的配置，不写入文件
   --steam          用本次参数启动 Steam（先手动完全退出已有 Steam）
@@ -43,7 +49,8 @@ usage() {
 Anti-Lag 层是本脚本的偏好设置，非 CachyOS 上游默认；--dx12-lowlatency 时自动关闭。
 HDR 自动检测、兼容游戏的 FSR 4 升级交给新版 Proton-CachyOS 默认处理。
 FSR 质量档、Anti-Lag 2、HDR 需在游戏内开启；VRR 需在 KDE 显示设置中开启。
-environment.d 通常需注销重登才传入桌面；不会更新已运行的 Steam。
+应用后完全退出 Steam，再从应用菜单启动即可；不会更新已运行的 Steam。
+终端直接运行 steam 等其它入口仍取决于会话环境，通常需注销重登。
 --steam 直接使用本次命令的参数，不读取 gaming.conf；自定义选项需重复传入。
 EOF
 }
@@ -87,6 +94,13 @@ lock_state() {
     flock -n 9 || die '另一个配置操作正在进行'
 }
 
+print_desktop() {
+    [[ -f "$DESKTOP_SOURCE" ]] || die "找不到原生 Steam 菜单入口：$DESKTOP_SOURCE"
+    local prefix="/usr/bin/env -u LOW_LATENCY_LAYER -u LOW_LATENCY_LAYER_REFLEX -u PROTON_FSR4_INDICATOR ${GAMING_ENV[*]}"
+    # 保留 Steam 的 URI 参数、翻译及右键菜单动作；不经 shell 执行。
+    awk -v prefix="$prefix" '/^Exec=/ {sub(/^Exec=/, "Exec=" prefix " ")} {print}' "$DESKTOP_SOURCE"
+}
+
 backup_config() {
     BACKUP_DIR=$(mktemp -d "$STATE_HOME/backups/$(date +%Y%m%d-%H%M%S)-XXXXXX")
     if [[ -e "$CONFIG_FILE" || -L "$CONFIG_FILE" ]]; then
@@ -97,38 +111,58 @@ backup_config() {
     fi
     # 保存文件所属路径，避免换了 XDG_CONFIG_HOME 后误恢复到另一个位置。
     printf '%s\n' "$CONFIG_FILE" > "$BACKUP_DIR/target"
+    if [[ -e "$DESKTOP_FILE" || -L "$DESKTOP_FILE" ]]; then
+        [[ -f "$DESKTOP_FILE" || -L "$DESKTOP_FILE" ]] || die 'steam.desktop 不是普通文件或符号链接'
+        cp -a -- "$DESKTOP_FILE" "$BACKUP_DIR/steam.desktop"
+    else
+        touch "$BACKUP_DIR/desktop-absent"
+    fi
+    printf '%s\n' "$DESKTOP_FILE" > "$BACKUP_DIR/desktop-target"
     printf '%s\n' "${BACKUP_DIR##*/}" > "$STATE_HOME/latest"
     printf '已备份：%s\n' "$BACKUP_DIR"
 }
 
 apply_config() {
     lock_state
-    mkdir -p "$(dirname "$CONFIG_FILE")"
+    [[ -f "$DESKTOP_SOURCE" ]] || die "找不到原生 Steam 菜单入口：$DESKTOP_SOURCE"
+    mkdir -p "$(dirname "$CONFIG_FILE")" "$(dirname "$DESKTOP_FILE")"
     TEMPORARY=$(mktemp "$(dirname "$CONFIG_FILE")/.gaming-XXXXXX")
+    DESKTOP_TEMPORARY=$(mktemp "$(dirname "$DESKTOP_FILE")/.steam-XXXXXX")
     print_config > "$TEMPORARY"
-    if [[ -f "$CONFIG_FILE" ]] && cmp -s -- "$TEMPORARY" "$CONFIG_FILE"; then
+    print_desktop > "$DESKTOP_TEMPORARY"
+    if [[ -f "$CONFIG_FILE" && -f "$DESKTOP_FILE" ]] &&
+        cmp -s -- "$TEMPORARY" "$CONFIG_FILE" && cmp -s -- "$DESKTOP_TEMPORARY" "$DESKTOP_FILE"; then
         printf '配置已相同，无需修改；保留原备份。\n'
         return
     fi
     backup_config
-    chmod 644 "$TEMPORARY"
+    chmod 644 "$TEMPORARY" "$DESKTOP_TEMPORARY"
     mv -fT -- "$TEMPORARY" "$CONFIG_FILE"
     TEMPORARY=''
+    mv -fT -- "$DESKTOP_TEMPORARY" "$DESKTOP_FILE"
+    DESKTOP_TEMPORARY=''
     printf '已写入：%s\n' "$CONFIG_FILE"
-    printf '请注销并重新登录。现在测试可完全退出 Steam 后，用本脚本 --steam 启动。\n'
+    printf '已写入：%s\n' "$DESKTOP_FILE"
+    printf '请完全退出 Steam，再从应用菜单启动；固定图标须指向 steam.desktop。\n'
     printf 'Steam 兼容性工具请选 Proton-CachyOS (SLR)；游戏内开启 FSR/HDR/Anti-Lag。\n'
 }
 
 restore_config() {
     lock_state
     [[ -f "$STATE_HOME/latest" ]] || die '没有可恢复的备份'
-    local name backup target
+    local name backup target desktop_target
     IFS= read -r name < "$STATE_HOME/latest"
     [[ "$name" =~ ^[0-9]{8}-[0-9]{6}-[a-zA-Z0-9]{6}$ ]] || die '备份名称无效'
     backup="$STATE_HOME/backups/$name"
     [[ -f "$backup/target" ]] || die '备份不完整'
     IFS= read -r target < "$backup/target"
     [[ "$target" == "$CONFIG_FILE" ]] || die '备份的配置路径与当前 XDG_CONFIG_HOME 不一致'
+    # 旧备份没有菜单入口元数据，此时只恢复环境配置。
+    if [[ -f "$backup/desktop-target" ]]; then
+        IFS= read -r desktop_target < "$backup/desktop-target"
+        [[ "$desktop_target" == "$DESKTOP_FILE" ]] || die '备份的菜单路径与当前 XDG_DATA_HOME 不一致'
+        [[ -f "$backup/desktop-absent" || -f "$backup/steam.desktop" || -L "$backup/steam.desktop" ]] || die '备份缺少 steam.desktop'
+    fi
     if [[ -f "$backup/absent" ]]; then
         rm -f -- "$CONFIG_FILE"
     else
@@ -138,6 +172,17 @@ restore_config() {
         cp -a --remove-destination -- "$backup/gaming.conf" "$TEMPORARY"
         mv -fT -- "$TEMPORARY" "$CONFIG_FILE"
         TEMPORARY=''
+    fi
+    if [[ -f "$backup/desktop-target" ]]; then
+        if [[ -f "$backup/desktop-absent" ]]; then
+            rm -f -- "$DESKTOP_FILE"
+        else
+            mkdir -p "$(dirname "$DESKTOP_FILE")"
+            DESKTOP_TEMPORARY=$(mktemp "$(dirname "$DESKTOP_FILE")/.steam-XXXXXX")
+            cp -a --remove-destination -- "$backup/steam.desktop" "$DESKTOP_TEMPORARY"
+            mv -fT -- "$DESKTOP_TEMPORARY" "$DESKTOP_FILE"
+            DESKTOP_TEMPORARY=''
+        fi
     fi
     printf '已恢复：%s\n请注销重登；当前进程中的旧环境不会自动清除。\n' "$backup"
 }
