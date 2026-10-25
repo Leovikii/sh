@@ -32,8 +32,13 @@ command() {
 mountpoint() { [[ ${IS_MOUNTED:-0} == 1 ]]; }
 mount() { printf '%s\n' "$@" > "$TEST_DIR/mount.args"; return "${MOUNT_RESULT:-0}"; }
 findmnt() {
-    if [[ $* == *'-o SOURCE'* ]]; then
+    if [[ $* == *'-o TARGET'* ]]; then
+        [[ ${IS_MOUNTED:-0} == 1 ]] || return 1
+        printf '%s\n' "$TARGET"
+    elif [[ $* == *'-o SOURCE'* ]]; then
         printf '%s\n' "${MOCK_SOURCE:-192.168.1.10:/export/共享\x20disk}"
+    elif [[ $* == *'-o OPTIONS'* ]]; then
+        printf '%s\n' "${MOCK_OPTIONS:-rw,hard,timeo=600,retrans=2}"
     else
         printf '%s\n' "${FSTYPE:-nfs4}"
     fi
@@ -42,13 +47,20 @@ findmnt() {
 umount() { printf '%s\n' "$@" > "$TEST_DIR/umount.args"; return "${UMOUNT_RESULT:-0}"; }
 systemd_ready() { return "${SYSTEMD_RESULT:-0}"; }
 systemctl() { printf '%s\n' "$*" >> "$TEST_DIR/systemctl.log"; return "${SYSTEMCTL_RESULT:-0}"; }
+timeout() {
+    printf '%s\n' "$*" >> "$TEST_DIR/timeout.log"
+    [[ ${TIMEOUT_RESULT:-0} == 0 ]] || return "$TIMEOUT_RESULT"
+    shift 2
+    "$@"
+}
 
 TARGET="$TEST_DIR/共享 disk"
-BASE_INPUT=$(printf '192.168.1.10\n/export/共享 disk\n%s' "$TARGET")
+BASE_INPUT=$(printf '192.168.1.10\n/export/共享 disk\n%s\n1' "$TARGET")
 INPUT=$BASE_INPUT$'\ny\nn'
 mount_share <<< "$INPUT"
-printf '%s\n' -t nfs -o rw,hard,nosuid,nodev -- '192.168.1.10:/export/共享 disk' "$TARGET" > "$TEST_DIR/expected"
+printf '%s\n' -t nfs -o rw,nosuid,nodev,proto=tcp,softerr,timeo=20,retrans=2,retry=0 -- '192.168.1.10:/export/共享 disk' "$TARGET" > "$TEST_DIR/expected"
 cmp "$TEST_DIR/expected" "$TEST_DIR/mount.args"
+grep -q '^--kill-after=2s 15s mount ' "$TEST_DIR/timeout.log"
 rm "$TEST_DIR/mount.args"
 
 mount_share <<< "$BASE_INPUT"$'\nn'
@@ -61,7 +73,7 @@ rm "$TARGET/.hidden"
 MOUNT_RESULT=1 expect_failure mount_share <<< "$INPUT"
 
 unmount_share <<< "$TARGET"
-printf '%s\n' -- "$TARGET" > "$TEST_DIR/expected"
+printf '%s\n' -i -c -- "$TARGET" > "$TEST_DIR/expected"
 cmp "$TEST_DIR/expected" "$TEST_DIR/umount.args"
 rm "$TEST_DIR/umount.args"
 FSTYPE=ext4 expect_failure unmount_share <<< "$TARGET"
@@ -71,6 +83,7 @@ UMOUNT_RESULT=1 expect_failure unmount_share <<< "$TARGET"
 
 # 默认开启、重复保存、空格/反斜杠转义及真实 fstab 解析。
 MOUNT_RESULT=1 expect_failure mount_share <<< "$BASE_INPUT"$'\ny\ny'
+TIMEOUT_RESULT=124 expect_failure mount_share <<< "$BASE_INPUT"$'\ny\ny'
 cmp "$TEST_DIR/original" "$FSTAB"
 mount_share <<< "$BASE_INPUT"$'\ny\n'
 autoconnect_enabled "$TARGET"
@@ -86,6 +99,9 @@ printf -v PARSED '%b' "$PARSED"
 PARSED=$(builtin command findmnt --fstab --tab-file "$FSTAB" -rn -t nfs -o TARGET)
 printf -v PARSED '%b' "$PARSED"
 [[ $PARSED == "$TARGET" ]]
+PARSED=$(builtin command findmnt --fstab --tab-file "$FSTAB" -rn -t nfs -o OPTIONS)
+[[ ,$PARSED, == *,softerr,* && ,$PARSED, == *,timeo=20,* && ,$PARSED, != *,hard,* ]]
+[[ ,$PARSED, == *,x-systemd.idle-timeout=60s,* ]]
 [[ $(fstab_escape '/mnt/a\b c') == '/mnt/a\134b\040c' ]]
 
 # 开关只修改目标条目，关闭无需服务器在线。
@@ -101,6 +117,19 @@ mount_share <<< "$INPUT"
 expect_failure autoconnect_enabled "$TARGET"
 cmp "$TEST_DIR/original" "$FSTAB"
 
+# 只读挂载及开关均保留只读权限。
+RO_INPUT=$(printf '192.168.1.10\n/export/共享 disk\n%s\n2\ny\ny' "$TARGET")
+mount_share <<< "$RO_INPUT"
+grep -qx 'ro,nosuid,nodev,proto=tcp,softerr,timeo=20,retrans=2,retry=0' "$TEST_DIR/mount.args"
+PARSED=$(builtin command findmnt --fstab --tab-file "$FSTAB" -rn -t nfs -o OPTIONS)
+[[ ,$PARSED, == *,ro,* && ,$PARSED, != *,rw,* ]]
+save_autoconnect "$TARGET"
+MOCK_OPTIONS=ro,hard MOCK_SOURCE='192.168.1.10:/export/共享\x20disk' toggle_autoconnect <<< "$TARGET"$'\ny'
+PARSED=$(builtin command findmnt --fstab --tab-file "$FSTAB" -rn -t nfs -o OPTIONS)
+[[ ,$PARSED, == *,ro,* && ,$PARSED, != *,rw,* ]]
+save_autoconnect "$TARGET"
+cmp "$TEST_DIR/original" "$FSTAB"
+
 # 拒绝接管手动配置；刷新失败时还原；无 systemd 时不写配置。
 printf '192.168.1.20:/manual %s nfs defaults 0 0\n' "$(fstab_escape "$TARGET")" >> "$FSTAB"
 cp "$FSTAB" "$TEST_DIR/manual"
@@ -113,5 +142,8 @@ SYSTEMCTL_RESULT=1 expect_failure save_autoconnect "$TARGET" '192.168.1.10:/expo
 cmp "$TEST_DIR/original" "$FSTAB"
 SYSTEMD_RESULT=1 expect_failure save_autoconnect "$TARGET" '192.168.1.10:/export/share'
 cmp "$TEST_DIR/original" "$FSTAB"
+TIMEOUT_RESULT=124 save_autoconnect "$TARGET" '192.168.1.10:/export/share'
+autoconnect_enabled "$TARGET"
+cmp "$TEST_DIR/original" "$FSTAB.nfs.bak"
 [[ -z $(find "$TEST_DIR" -name 'fstab.nfs.??????' -print) ]]
 printf '\nPASS\n'
