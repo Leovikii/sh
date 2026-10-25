@@ -9,7 +9,8 @@ CONFIG_FILE="$CONFIG_HOME/environment.d/gaming.conf"
 FPS=117
 CACHE_SIZE=12G
 DX12_LOWLATENCY=0
-ANTI_LAG_LAYER=false
+# 实验性 VKD3D 分支不支持 Anti-Lag 2，默认不与该层叠加。
+ANTI_LAG_LAYER=auto
 FSR_INDICATOR=false
 FLATPAK=false
 TEMPORARY=''
@@ -32,12 +33,14 @@ usage() {
   --fps N          帧率上限，默认 117；范围 1..1000
   --cache-size N[G|M]   Mesa 磁盘着色器缓存上限，默认 12G
   --dx12-lowlatency     使用实验性 VKD3D 低延迟分支；不支持帧生成/Anti-Lag 2
-  --anti-lag-layer      加载可选 low_latency_layer 的 Anti-Lag 模式
+  --anti-lag-layer      显式加载 low_latency_layer 的 Anti-Lag 模式（默认开启）
+  --no-anti-lag-layer   不加载该层；用于兼容性或帧时间对比
   --fsr-indicator       打开 FSR 4 验证水印
   --flatpak            仅配合 --steam，为 Flatpak Steam 显式传递参数
   --help               显示帮助
 
-默认：原生 Wayland、DXVK VRR 低延迟、117 FPS、12G 缓存。
+默认：原生 Wayland、DXVK VRR 低延迟、Anti-Lag 层、117 FPS、12G 缓存。
+Anti-Lag 层是本脚本的偏好设置，非 CachyOS 上游默认；--dx12-lowlatency 时自动关闭。
 HDR 自动检测、兼容游戏的 FSR 4 升级交给新版 Proton-CachyOS 默认处理。
 FSR 质量档、Anti-Lag 2、HDR 需在游戏内开启；VRR 需在 KDE 显示设置中开启。
 environment.d 通常需注销重登才传入桌面；不会更新已运行的 Steam。
@@ -48,7 +51,7 @@ EOF
 build_environment() {
     [[ "$FPS" =~ ^[1-9][0-9]{0,3}$ ]] && ((FPS <= 1000)) || die 'fps 必须是 1..1000 的整数'
     [[ "$CACHE_SIZE" =~ ^[1-9][0-9]{0,4}[GM]$ ]] || die 'cache-size 格式应为 12G 或 512M'
-    [[ "$ANTI_LAG_LAYER" == false || "$DX12_LOWLATENCY" == 0 ]] || die '请分别测试 Anti-Lag 层与 VKD3D 低延迟，不要同时启用'
+    [[ "$ANTI_LAG_LAYER" != true || "$DX12_LOWLATENCY" == 0 ]] || die '请分别测试 Anti-Lag 层与 VKD3D 低延迟，不要同时启用'
     GAMING_ENV=(
         'PROTON_ENABLE_WAYLAND=1'
         'PROTON_DXVK_LOWLATENCY=1'
@@ -58,7 +61,9 @@ build_environment() {
         "VKD3D_FRAME_RATE=$FPS"
         "MESA_SHADER_CACHE_MAX_SIZE=$CACHE_SIZE"
     )
-    if "$ANTI_LAG_LAYER"; then GAMING_ENV+=('LOW_LATENCY_LAYER=1'); fi
+    if [[ "$ANTI_LAG_LAYER" == true || ( "$ANTI_LAG_LAYER" == auto && "$DX12_LOWLATENCY" == 0 ) ]]; then
+        GAMING_ENV+=('LOW_LATENCY_LAYER=1')
+    fi
     if "$FSR_INDICATOR"; then GAMING_ENV+=('PROTON_FSR4_INDICATOR=1'); fi
 }
 
@@ -70,6 +75,7 @@ print_config() {
 # 游戏内：FSR Quality 起步，支持时开启 Anti-Lag 2；优先测试关闭帧生成。
 # HDR 检测和兼容游戏的 FSR 4 升级使用新版 Proton-CachyOS 默认行为。
 # DXVK/VKD3D 低延迟分支的参数不同；VKD3D 分支不是 Anti-Lag 2 开关。
+# 默认加载 Anti-Lag 层是用户偏好；游戏仍需支持并启用 Anti-Lag 2。
 EOF
     printf '%s\n' "${GAMING_ENV[@]}"
 }
@@ -203,6 +209,7 @@ main() {
                 shift 2 ;;
             --dx12-lowlatency) DX12_LOWLATENCY=1; shift ;;
             --anti-lag-layer) ANTI_LAG_LAYER=true; shift ;;
+            --no-anti-lag-layer) ANTI_LAG_LAYER=false; shift ;;
             --fsr-indicator) FSR_INDICATOR=true; shift ;;
             --flatpak) FLATPAK=true; shift ;;
             --help|-h) usage; return 0 ;;
