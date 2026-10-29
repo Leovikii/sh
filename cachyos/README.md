@@ -1,90 +1,98 @@
 # CachyOS 配置脚本
 
-## Proton：RX 9070 XT / 4K 120Hz HDR + VRR
+## Steam 统一启动设置
 
-`proton_setup.sh` 设置统一环境参数，默认帧率上限为 **117 FPS**。运行后仍需在 **Steam 设置 → 兼容性**中将默认兼容性工具选为 **Proton-CachyOS 的 SLR 构建**。若游戏在“属性 → 兼容性”中强制指定了其它版本，取消该覆盖或改选 CachyOS SLR。脚本不切换 Proton 版本，也不修改游戏画质菜单；官方 Proton 不保证支持这些扩展参数。
+`steam_setup.sh` 管理原生 Steam 的 Proton 环境参数与 SDL 手柄分类。针对 RX 9070 XT / KDE Wayland / 4K 120Hz HDR + VRR，默认请求 **117 FPS** 上限。旧 `proton_setup.sh` 已删除，不提供旧命令兼容入口。
 
-普通用户运行，无需 sudo：
+### 使用
+
+普通用户运行，不要 sudo：
 
 ```bash
-# 在仓库根目录执行：先预览，再持久化
-bash cachyos/proton_setup.sh --print-config
-bash cachyos/proton_setup.sh --apply
-
+bash cachyos/steam_setup.sh --print-config
+bash cachyos/steam_setup.sh --apply
 # 完全退出 Steam，再从应用菜单或标准 Steam 固定图标启动。
-# 也可直接用本次参数启动：
-bash cachyos/proton_setup.sh --steam
+# 也可以使用相同的已保存配置启动：
+bash cachyos/steam_setup.sh --steam
+bash cachyos/steam_setup.sh --diagnose
 
-# 检查显示设置、配置文件和 Steam 启动时继承的参数
-bash cachyos/proton_setup.sh --diagnose
+# 修改已有配置时，只更新明确指定的选项
+bash cachyos/steam_setup.sh --apply --fps 117 --cache-size 12G
 
-# 恢复最近一次应用前的配置；之后注销重登
-bash cachyos/proton_setup.sh --restore
+# 无备份清除本脚本添加的启动设置
+bash cachyos/steam_setup.sh --remove
 ```
 
-`--apply` 写入 `${XDG_CONFIG_HOME:-~/.config}/environment.d/gaming.conf`，并根据系统 `/usr/share/applications/steam.desktop` 生成 `${XDG_DATA_HOME:-~/.local/share}/applications/steam.desktop`。用户级入口会为每个启动动作直接传入本次参数，保留 Steam 链接、翻译和右键菜单；普通菜单启动不再依赖旧桌面会话是否继承了新变量。固定图标需指向标准 `steam.desktop`；自定义快捷方式、终端直接运行 `steam`、自动启动不一定经过此入口。
+按本机用户要求，应用与清理**不创建备份**。首次安装使用下表默认值；后续读取已有配置，不用默认值覆盖用户选择。修改 `gaming.conf` 后，完全退出并重新启动 Steam 即可，无需再次应用；现有进程不会自动改变。系统 Steam 菜单入口更新后，再运行 `--apply` 同步菜单动作。
 
-两份文件覆盖前均保存完整文件或符号链接到 `${XDG_STATE_HOME:-~/.local/state}/cachyos-proton/backups/`，恢复时还原原文件；原先不存在的入口会删除。相同配置和入口重复应用不增加备份。若此前已有自定义用户级 Steam 入口，其内容会备份后整体替换。旧版备份只恢复 `gaming.conf`。参数作用于 Steam 启动的游戏，包括之后安装的游戏和 Proton 版本，不依赖修改 Proton 安装目录。系统 Steam 入口更新后可重新运行 `--apply` 同步。
+### 唯一参数来源
 
-`environment.d` 由 systemd 用户环境生成器处理，是否进入桌面进程还取决于会话如何启动；其它入口通常仍需注销重登。仅 `daemon-reload` 或重启终端无法更新已运行的桌面、Steam。菜单入口和 `--steam` 均显式传递参数；已运行的 Steam 必须先完全退出。`--steam` 使用**本次命令选项**生成参数，不读取 `gaming.conf`，自定义选项需再次传入。持久菜单入口针对原生 Steam；Flatpak 请用 `--steam --flatpak`，脚本通过 `flatpak run --env=...` 传入参数，不持久化 Flatpak overrides。
+| 文件 | 作用 |
+| --- | --- |
+| `${XDG_CONFIG_HOME:-~/.config}/environment.d/gaming.conf` | 唯一参数来源；systemd 用户环境生成器直接读取 |
+| `~/.local/bin/steam-managed` | 每次启动读取配置，清除本脚本管理的旧变量后启动 Steam |
+| `${XDG_DATA_HOME:-~/.local/share}/steam-setup/environment.sh` | 启动器和 KDE 共用的参数校验及加载逻辑 |
+| `${XDG_CONFIG_HOME:-~/.config}/plasma-workspace/env/gaming-env.sh` | KDE 登录时读取同一配置，供会话启动的程序继承 |
+| `${XDG_DATA_HOME:-~/.local/share}/applications/steam.desktop` | 只调用启动器，保留 Steam URI、翻译和右键菜单动作 |
 
-### 默认参数和取舍
+配置使用普通 `KEY=VALUE`；不要加引号、`export`、行尾注释或变量展开。仅接受已支持的键和值，不会 `source`/`eval` 配置内容。Xbox 分类值中的第二个 `=` 会完整保留。无效配置会阻止启动，并输出错误。
 
-| 参数 | 默认值 | 用途与限制 |
+`--apply` 只更新已标记属于本脚本的文件；遇到其它文件或符号链接，会在写入前退出，避免无备份覆盖自定义内容。`--remove` 同样只清理本脚本的文件，不改 Steam 账户、已安装游戏、存档、手柄布局或游戏启动选项。部署新版前，旧方案添加的配置、登录脚本和用户级 Steam 快捷方式应先清理；没有旧版迁移或恢复分支。
+
+原生菜单启动可立即使用新配置；脚本也刷新可访问的 KDE systemd 用户管理器环境。**已运行的桌面、终端和 D-Bus 服务仍可能保留旧值，彻底更新这些路径需注销重登。** 直接在旧终端运行 `/usr/bin/steam` 不一定经过统一启动器；可以运行 `~/.local/bin/steam-managed`。这里的会话环境也可能影响其它读取相同变量的程序。
+
+### 默认参数及核对结果
+
+| 参数 | 默认值 | 实际作用 |
 | --- | --- | --- |
-| `PROTON_ENABLE_WAYLAND` | `1` | 请求 Wine 原生 Wayland；不会自动打开显示器 HDR、VRR |
-| `PROTON_DXVK_LOWLATENCY` | `1` | 使用 DXVK 低延迟分支，主要针对 D3D9/10/11 |
-| `DXVK_FRAME_PACE` | `low-latency-vrr` | DXVK 低延迟 VRR 模式；需对应分支版本和实际启用 VRR |
-| `DXVK_FRAME_RATE` / `VKD3D_FRAME_RATE` | `117` | 请求帧率上限，不能保证性能不足时也达到 117 FPS |
-| `PROTON_VKD3D_LOWLATENCY` | `0` | 默认采用普通 VKD3D，保留游戏原有 Anti-Lag 2/帧生成路径 |
-| `LOW_LATENCY_LAYER` | `1` | 默认加载随 Proton 提供的 Anti-Lag 层；游戏仍需支持并开启 Anti-Lag 2 |
-| `MESA_SHADER_CACHE_MAX_SIZE` | `12G` | Mesa 磁盘着色器缓存上限，不是显存，也不是所有缓存的总上限 |
+| `PROTON_ENABLE_WAYLAND` | `1` | 请求 Wine 原生 Wayland；不负责开启显示器 HDR/VRR |
+| `PROTON_DXVK_LOWLATENCY` | `1` | 选择随 Proton 提供的 DXVK 低延迟分支，主要用于 D3D9/10/11 |
+| `DXVK_FRAME_PACE` | `low-latency-vrr` | 对应 DXVK 分支的 VRR 帧节奏；需实际启用 VRR |
+| `DXVK_FRAME_RATE` / `VKD3D_FRAME_RATE` | `117` | 两个分支各自读取限帧；数值必须一致 |
+| `MESA_SHADER_CACHE_MAX_SIZE` | `12G` | Mesa 磁盘着色器缓存上限，不能消除所有首次编译卡顿 |
+| `LOW_LATENCY_LAYER` | `1` | 加载 Proton 提供的可选 Anti-Lag 层；游戏仍需支持并启用 Anti-Lag 2 |
+| `SDL_GAMECONTROLLERTYPE` | 检测到 `37d7:2401` 时为 `0x37d7/0x2401=Xbox360` | 将 Vader 5 Pro 按 Xbox 360 分类，不等于关闭 Steam Input |
 
-默认加载 Anti-Lag 层是按本机用户需求设置的偏好，**不是 Proton-CachyOS 上游默认或全游戏兼容保证**。CachyOS 在 [11.0-20260519 更新记录](https://github.com/CachyOS/proton-cachyos/blob/cachyos_main/CHANGELOG.md#version-110-20260519)中明确将其列为可选层，使用 `LOW_LATENCY_LAYER=1` 加载，并要求进一步查阅组件文档。此前脚本中的 DXVK 帧节奏参数来自 CachyOS 引用的低延迟分支文档，它们不等于 Anti-Lag 2。
+核对日期 **2026-10-29**：本机 `proton-cachyos-slr 11.0.20261015` 的 `proton` 确认读取三个功能开关；DXVK 低延迟 DLL 确认包含 `DXVK_FRAME_PACE`、`DXVK_FRAME_RATE` 和 VRR 模式，普通 VKD3D DLL 确认包含 `VKD3D_FRAME_RATE`。`protonfixes/utilities.py::setup_frame_rate()` 还会将限帧映射到 `dxgi.maxFrameRate` / `d3d9.maxFrameRate`；因此保留两个分支变量，不直接覆盖 `DXVK_CONFIG`。
 
-脚本不再设置 `DXVK_HDR`、`PROTON_FSR4_UPGRADE` 或 `DXVK_CONFIG`。新版 Proton-CachyOS 在受支持的 KDE Wayland 环境下自动检测 HDR；本机安装版也已默认启用兼容游戏的 FSR 4 升级，首次使用可能由 Proton 下载 DLL。游戏内 HDR 和 FSR 仍需开启。这些默认行为不适用于所有旧版或其它 Proton 分支。
+省略默认关闭的 `PROTON_VKD3D_LOWLATENCY=0`，加载器会清除旧会话残留再读配置。HDR 自动检测与兼容游戏的 FSR 4 升级沿用本机新版 Proton-CachyOS 默认行为，不重复添加 `DXVK_HDR=1`、`PROTON_FSR4_UPGRADE=1`，也不固定某个 FSR 版本。加载器同时清除这两个旧强制变量及 `LOW_LATENCY_LAYER_REFLEX`；保留其它用户变量，例如自定义的 `DXVK_CONFIG`。
 
-不要在其它位置再设置不同的帧率上限。CachyOS 当前 `protonfixes/utilities.py::setup_frame_rate()` 按 `DXVK_FRAME_RATE`、`VKD3D_FRAME_RATE`、`PROTON_FRAME_RATE` 的顺序取值，再追加 DXGI、D3D9 限帧配置。脚本保留两个分支各自使用的帧率变量，全部设为同一个值，且不再覆盖已有 `DXVK_CONFIG` 的其它键。从旧版脚本更新后请注销重登，清除旧会话继承的参数。
+Anti-Lag 层是本机用户偏好，**不是 CachyOS 上游默认或全游戏兼容保证**。实验性 VKD3D 低延迟目前仍不支持 Anti-Lag 2 和帧生成，因此默认不启用。选用 `--dx12-lowlatency` 会移除 Anti-Lag 层；显式同时要求两者则报错。FPS 与实际低延迟改善、游戏菜单是否可用需要游戏内验证，环境匹配不代表功能已经生效。
 
-### 游戏内仍需设置
+### 单游戏设置与可选项
 
-1. KDE 显示设置确认 **3840×2160 / 120Hz / HDR**，自适应同步选择“自动”或“始终”；显示器 OSD 也启用 FreeSync/Adaptive-Sync。HDR 开启不等于 VRR 已开启。
-2. 游戏输出分辨率保持 3840×2160，FSR 从 **Quality（质量）**起步。时间升频需要游戏集成，并不能靠环境变量给任意游戏添加。支持升级的游戏可能仍显示“FSR 3.1”；用水印确认实际实现。
-3. 游戏支持 **AMD Anti-Lag 2** 时在游戏内开启。它需要游戏发送延迟标记；DXVK/VKD3D 低延迟分支与 Anti-Lag 2 是不同机制。
-4. 优先以**关闭帧生成**的状态检查基础帧率、VRR 和输入延迟，再逐游戏比较是否启用帧生成。117 是上限，不会把低基础帧率变为 117 FPS 的响应速度；帧生成后的显示帧率与基础帧率也不相同。
-
-### 可选低延迟路径
+Steam 默认兼容性工具仍需选择 **Proton-CachyOS SLR**；游戏属性中指定的其它 Proton 版本可能覆盖它。KDE 和显示器 OSD 中开启 VRR，游戏内按需开启 HDR、FSR、Anti-Lag 2。
 
 ```bash
-# 验证兼容游戏是否真的启用了 FSR 4
-bash cachyos/proton_setup.sh --steam --fsr-indicator
+# 持久关闭 Anti-Lag 层，或打开 FSR 验证水印
+bash cachyos/steam_setup.sh --apply --no-anti-lag-layer
+bash cachyos/steam_setup.sh --apply --fsr-indicator
 
-# 默认已加载 Anti-Lag 层；对比关闭后是否更稳定
-bash cachyos/proton_setup.sh --steam --no-anti-lag-layer
+# 可选实验路径；游戏中关闭 Anti-Lag 2 和帧生成
+bash cachyos/steam_setup.sh --apply --dx12-lowlatency
 
-# 单独测试 DX12 实验性低延迟：游戏需使用 Reflex 或 Waitable Swapchains
-# 此模式关闭游戏内帧生成，并避免同时使用 Anti-Lag 2
-bash cachyos/proton_setup.sh --steam --dx12-lowlatency
+# 临时启动 Flatpak；不安装 Flatpak overrides，也不改 Flatpak 菜单
+bash cachyos/steam_setup.sh --steam --flatpak
 
-# 自定义持久配置；即时启动时重复相同选项
-bash cachyos/proton_setup.sh --apply --fps 117 --cache-size 12G
+# Steam 客户端参数或 URI 原样转发；不把它们当成游戏参数
+bash cachyos/steam_setup.sh --steam -- steam://open/games
 ```
 
-截至本次查阅，`vkd3d-low-latency` README 明确列出 **Anti-Lag 2、帧生成尚不支持**，并非适合所有 DX12 游戏的全局开关。因此默认关闭它。`--dx12-lowlatency` 自动省略 Anti-Lag 层；与显式的 `--anti-lag-layer` 同用会报错。可在单个游戏启动选项里设 `DISABLE_LOW_LATENCY_LAYER=1 PROTON_VKD3D_LOWLATENCY=1 %command%` 逐个测试，并关闭游戏内 Anti-Lag 2 和帧生成；支持的游戏可通过 Proton 日志里的 `waitable dxgi swapchain present percentage` 验证 Waitable Swapchains 路径。
+`--steam` 只读取已保存配置；选项先通过 `--apply` 保存。单个游戏异常时，可在该游戏启动选项中使用 `DISABLE_LOW_LATENCY_LAYER=1 %command%` 或 `PROTON_ENABLE_WAYLAND=0 %command%` 对比。《鬼武者：剑之道》的 `/WineDetectionEnabled:False` 继续留在该游戏 `%command%` 后面，不推广为全局参数。
 
-`--anti-lag-layer` 保留为显式开启选项。持久关闭可用 `--apply --no-anti-lag-layer` 后完全退出 Steam，再从菜单启动；仅某款游戏异常时，使用 `DISABLE_LOW_LATENCY_LAYER=1 %command%` 单独关闭。加载层、游戏菜单可选、实际发送 Anti-Lag 调用及测得延迟降低是不同验证步骤；游戏未调用接口时不能靠变量补上。脚本不设置 `LOW_LATENCY_LAYER_REFLEX=1`、`PROTON_FORCE_NVAPI=1` 或显卡厂商伪装；尤其 NVIDIA 伪装可能破坏 FSR 4 的 AMD 识别。Reflex 替代方案需要按具体游戏测试。菜单入口和 `--steam` 会清除 Anti-Lag 层、FSR 水印及 `LOW_LATENCY_LAYER_REFLEX` 的旧会话残留，再按本次选项传入参数。
+CachyOS 文档说明原生 Wayland 的 Steam Input 存在限制，可按游戏测试 `PROTON_USE_SDL=1`；不把它强制加入所有游戏。Xbox 分类不能提供飞智专用背键、陀螺仪等额外功能；本脚本不替换 SDL 库、不解绑 `xpad`。
 
-《鬼武者：剑之道》已通过组合启动项解锁光追及 Anti-Lag 菜单，但尚未单独验证每个参数的贡献或测量输入延迟。其 `/WineDetectionEnabled:False` 是游戏参数，继续保留在该游戏的 `%command%` 后面；全局加载 Anti-Lag 层不能代替游戏自身的检测绕过。
+### 验证与依据
 
-原生 Wayland 下如游戏启动器白屏或手柄异常，先在该游戏启动选项测试 `PROTON_ENABLE_WAYLAND=0 %command%`。桌面环境里的参数和单个游戏启动参数可能覆盖默认值；诊断里的 Steam 环境也不能证明最终游戏已经启用 HDR、FSR 或低延迟。
+```bash
+bash -n cachyos/steam_setup.sh
+sh -n cachyos/steam/environment.sh cachyos/steam/steam-managed
+PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s cachyos/tests -p test_steam_setup.py -v
+```
 
-### 核对依据
+测试使用独立的空白 HOME/XDG 目录和假 Steam，覆盖首次安装、已有选择保留、幂等、运行时读取配置、参数转发、KDE/systemd 一致性、配置注入拒绝、自定义文件保护及清理。测试不会启动真实 Steam。需要本机另行核对实际启动环境与手柄日志；电脑重启和游戏表现仍需实测。
 
-文档核对日期：2026-10-25；本机安装的 `proton-cachyos-slr/proton`、`protonfixes/utilities.py`、`protonfixes/upscalers.py` 也核对了参数解析、限帧和升级路径。升级 Proton 后，应以所装版本的实现为准。
-
-- [Proton-CachyOS 配置说明](https://github.com/CachyOS/proton-cachyos/blob/cachyos_main/README.md)：Wayland、HDR、FSR 升级和可选组件。
-- [Proton-CachyOS 更新记录](https://github.com/CachyOS/proton-cachyos/blob/cachyos_main/CHANGELOG.md)：11.0-20260519 引入可选 Anti-Lag 层，11.0-20260703 引入可选 VKD3D 低延迟分支并强调阅读限制。
-- [DXVK low-latency](https://github.com/netborg-afps/dxvk-low-latency)：VRR pacing 与帧率上限；较旧版本的 VRR 模式名称不同。
-- [VKD3D low-latency](https://github.com/netborg-afps/vkd3d-low-latency#status--limitations)：触发条件和 Anti-Lag 2 / 帧生成限制。
-- [low_latency_layer](https://github.com/Korthos-Software/low_latency_layer#usage-and-configuration)：Anti-Lag 与 Reflex 模式、显卡伪装对 FSR 的影响。
-- [Proton-EM FSR 4 说明](https://github.com/Etaash-mathamsetty/Proton/blob/em-10/docs/FSR4.md)：RDNA4 和 Mesa 支持条件；CachyOS 的水印开关以自身文档为准。
+- [Proton-CachyOS 文档](https://github.com/CachyOS/proton-cachyos/blob/cachyos_main/README.md)：Wayland、HDR、升级器和可选层。
+- [DXVK low-latency](https://github.com/netborg-afps/dxvk-low-latency)：分支开关、VRR 帧节奏与限帧。
+- [VKD3D low-latency 限制](https://github.com/netborg-afps/vkd3d-low-latency#status--limitations)：Anti-Lag 2、帧生成限制。
+- [low_latency_layer](https://github.com/Korthos-Software/low_latency_layer#usage-and-configuration)：可选层、游戏调用要求和开关。

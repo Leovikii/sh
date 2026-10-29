@@ -1,0 +1,21 @@
+#!/bin/sh
+# Managed by sh/cachyos/steam_setup.sh
+set -eu
+. "${XDG_DATA_HOME:-$HOME/.local/share}/steam-setup/environment.sh"
+steam_load_environment
+if [ "${1:-}" = --flatpak ]; then
+    shift
+    set -- com.valvesoftware.Steam "$@"
+    # The file was validated above; values are passed as individual arguments.
+    steam_data=$(steam_config_lines "${XDG_CONFIG_HOME:-$HOME/.config}/environment.d/gaming.conf")
+    while IFS= read -r steam_line; do
+        [ -z "$steam_line" ] || set -- "--env=$steam_line" "$@"
+    done <<EOF_STEAM_FLATPAK
+$steam_data
+EOF_STEAM_FLATPAK
+    for steam_key in $steam_env_keys $steam_legacy_keys; do
+        set -- "--unset-env=$steam_key" "$@"
+    done
+    exec flatpak run "$@"
+fi
+exec /usr/bin/steam "$@"
