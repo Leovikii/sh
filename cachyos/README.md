@@ -1,5 +1,15 @@
 # CachyOS 配置脚本
 
+## KDE 原生美化方案 A
+
+[`kde_setup.sh`](./kde_setup.sh) 使用 Breeze 骨架、Klassy 窗口装饰、Catppuccin Mocha Pink、Papirus-Dark 与 Bibata Modern Ice。无参数打开简洁菜单，可一键安装并应用全部，也可多选组件；每次检测目标系统，已有组件和已符合的配置跳过，应用前自动备份。面板布局、Qt 渲染参数和字体保留。使用方法、完整系统升级及整文件恢复的说明见 [KDE_SETUP.md](./KDE_SETUP.md)。
+
+```bash
+bash cachyos/kde_setup.sh                          # 交互菜单
+bash cachyos/kde_setup.sh --setup                  # 全部安装并应用
+bash cachyos/kde_setup.sh --setup colors papirus   # 仅配色和图标
+```
+
 ## Steam 统一启动设置
 
 `steam_setup.sh` 管理原生 Steam 的 Proton 环境参数与 SDL 手柄分类。针对 RX 9070 XT / KDE Wayland / 4K 120Hz HDR + VRR，默认请求 **117 FPS** 上限。旧 `proton_setup.sh` 已删除，不提供旧命令兼容入口。
