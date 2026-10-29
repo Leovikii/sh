@@ -1,5 +1,29 @@
 # CachyOS 配置脚本
 
+## KDE 登录屏幕只启用主屏
+
+[`login_screen_setup.sh`](./login_screen_setup.sh) 针对 **Plasma Login Manager + KWin Wayland**，解决登录界面双屏重合的问题。它读取当前用户已保存的 `kwinoutputconfig.json`，生成登录账户专用配置，将主屏移至 `(0,0)` 并禁用同一布局里的其它屏幕，保留分辨率、缩放等设置。当前桌面的配置不变；主屏未连接的已保存布局保留，方便仅接副屏时登录。这是登录界面的规避方案，不能修复用户桌面自身的布局 bug，也不管理锁屏。
+
+普通用户运行，不要 sudo 整个脚本：
+
+```bash
+bash cachyos/login_screen_setup.sh --preview                 # 只预览 JSON
+bash cachyos/login_screen_setup.sh --apply                   # 自动推断主屏，内部 sudo 写入
+bash cachyos/login_screen_setup.sh --apply --primary DP-1    # 或明确保留接口
+```
+
+应用前请先在 KDE 显示设置中保存正确布局。存在多个历史主屏时，脚本要求显式指定接口。脚本仅在实际启用 `plasmalogin.service` 时写入，从系统账户查找登录目录（通常 `/var/lib/plasmalogin/.config/kwinoutputconfig.json`）；不适用于 SDDM/X11。主屏缺席或全新屏幕组合的行为取决于 KWin 的匹配与自动配置，需要实机验证。
+
+每次变更前自动备份，重复运行且内容一致时跳过。脚本不重启服务，保存工作后重启电脑验证。恢复时将输出的实际备份目录替换下方路径；若备份包含 `original-absent`，则用第二条命令删除本脚本新建的配置。恢复同样在下次启动登录界面时生效：
+
+```bash
+sudo cp -a /var/lib/plasmalogin/.config/login-screen-backup.XXXXXXXX/kwinoutputconfig.json /var/lib/plasmalogin/.config/kwinoutputconfig.json
+# 仅当备份包含 original-absent 时：
+sudo rm /var/lib/plasmalogin/.config/kwinoutputconfig.json
+```
+
+验证：`bash -n cachyos/login_screen_setup.sh` 和 `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s cachyos/tests -p test_login_screen_setup.py -v`。测试只读写临时配置，不启动登录管理器。
+
 ## KDE 原生美化方案 A
 
 [`kde_setup.sh`](./kde_setup.sh) 使用 Breeze 骨架、Klassy 窗口装饰、Catppuccin Mocha Pink、Papirus-Dark 与 Bibata Modern Ice。无参数打开简洁菜单，可一键安装并应用全部，也可多选组件；每次检测目标系统，已有组件和已符合的配置跳过，应用前自动备份。面板布局、Qt 渲染参数和字体保留。使用方法、完整系统升级及整文件恢复的说明见 [KDE_SETUP.md](./KDE_SETUP.md)。
