@@ -7,6 +7,7 @@
 | [`cachyos`](./cachyos/) | 唤醒管理与字体对比页；初始化配置已迁至 [CachyOS Setup](https://github.com/Leovikii/cachyos-setup) |
 | [`omv`](./omv/) | OpenMediaVault 字幕调轴与组件管理 |
 | [`nfs`](./nfs/) | 局域网 NFS 交互挂载工具 |
+| [`smb`](./smb/) | 局域网 SMB 交互挂载、保存凭据与开机按需连接 |
 | [`renewx`](./renewx/) | RenewX 部署工具 |
 | [`rclone`](./rclone/) | Windows rclone 磁盘管理 v1.0.0，含 winget 组件安装/卸载 |
 | [`wrt`](./wrt/) | OpenWrt 工具 |
